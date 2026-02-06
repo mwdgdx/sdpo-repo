@@ -22,7 +22,7 @@ data:
 
 actor_rollout_ref:
   actor:
-    ppo_micro_batch_size_per_gpu: ${oc.env:MICRO_BATCH_SIZE,1}
+    ppo_micro_batch_size_per_gpu: ${oc.decode:${oc.env:MICRO_BATCH_SIZE,1}}
     ppo_max_token_len_per_gpu: ${max_model_len}
     clip_ratio_high: 0.28
     use_kl_loss: False
@@ -30,17 +30,17 @@ actor_rollout_ref:
     path: ${oc.env:MODEL_PATH}
     trust_remote_code: True
     # LoRA configuration - set LORA_RANK > 0 to enable
-    lora_rank: ${oc.env:LORA_RANK,0}
-    lora_alpha: ${oc.env:LORA_ALPHA,32}
+    lora_rank: ${oc.decode:${oc.env:LORA_RANK,0}}
+    lora_alpha: ${oc.decode:${oc.env:LORA_ALPHA,32}}
     target_modules: all-linear
     # Enable gradient checkpointing to save memory
     enable_gradient_checkpointing: True
   ref:
-    log_prob_micro_batch_size_per_gpu: ${oc.env:MICRO_BATCH_SIZE,1}
+    log_prob_micro_batch_size_per_gpu: ${oc.decode:${oc.env:MICRO_BATCH_SIZE,1}}
   rollout:
     name: vllm
-    gpu_memory_utilization: ${oc.env:GPU_MEM_UTIL,0.55}
-    log_prob_micro_batch_size_per_gpu: ${oc.env:MICRO_BATCH_SIZE,1}
+    gpu_memory_utilization: ${oc.decode:${oc.env:GPU_MEM_UTIL,0.55}}
+    log_prob_micro_batch_size_per_gpu: ${oc.decode:${oc.env:MICRO_BATCH_SIZE,1}}
     max_num_batched_tokens: ${max_model_len}
     max_model_len: ${max_model_len}
     val_kwargs:
@@ -67,11 +67,11 @@ trainer:
   project_name: ${oc.env:PROJECT_NAME}
   group_name: ${oc.env:EXPERIMENT_NAME}
   experiment_name: ${oc.env:EXPERIMENT_NAME}
-  n_gpus_per_node: ${oc.env:N_GPUS}
+  n_gpus_per_node: ${oc.decode:${oc.env:N_GPUS,4}}
   nnodes: 1
-  save_freq: ${oc.env:SAVE_FREQ}
-  test_freq: ${oc.env:TEST_FREQ}
+  save_freq: ${oc.decode:${oc.env:SAVE_FREQ,10}}
+  test_freq: ${oc.decode:${oc.env:TEST_FREQ,5}}
   # Only keep latest N checkpoints to save disk space (old ones auto-deleted)
-  max_actor_ckpt_to_keep: ${oc.env:MAX_CKPT_TO_KEEP,2}
-  total_epochs: ${oc.env:TOTAL_EPOCHS}
+  max_actor_ckpt_to_keep: ${oc.decode:${oc.env:MAX_CKPT_TO_KEEP,2}}
+  total_epochs: ${oc.decode:${oc.env:TOTAL_EPOCHS,30}}
   default_local_dir: ${oc.env:CKPT_DIR}/${trainer.experiment_name}
