@@ -212,27 +212,23 @@ apply_preset() {
 # If PRESET is set, use it directly; otherwise show interactive menu
 if [ -n "$PRESET" ]; then
     apply_preset "$PRESET"
-elif [ "$INTERACTIVE" = "true" ] && [ -t 0 ]; then
+elif [ "$INTERACTIVE" = "true" ]; then
     echo ""
     echo "=============================================="
-    echo "Select Hardware Configuration (↑/↓ + Enter)"
+    echo "Select Hardware Configuration"
     echo "=============================================="
     echo ""
-    
-    options=(
-        "8x A6000 48GB  │ LoRA │ batch=32 │ (Recommended)"
-        "8x A100 80GB   │ Full │ batch=32 │ (Best quality)"
-        "4x A6000 48GB  │ LoRA │ batch=16 │ (Budget)"
-    )
-    
-    select_option "${options[@]}"
-    selected=$?
-    
+    echo "  [0] 8x A6000 48GB  │ LoRA │ batch=32 │ (Recommended)"
+    echo "  [1] 8x A100 80GB   │ Full │ batch=32 │ (Best quality)"
+    echo "  [2] 4x A6000 48GB  │ LoRA │ batch=16 │ (Budget)"
     echo ""
-    apply_preset $selected
+    read -p "Enter choice [0-2] (default: 0): " choice </dev/tty
+    choice="${choice:-0}"
+    echo ""
+    apply_preset "$choice"
 else
-    # Non-interactive, use defaults
-    apply_preset "4xa6000"
+    # Non-interactive (INTERACTIVE=false), use 8x A6000 as default
+    apply_preset "8xa6000"
 fi
 
 # ============================================================================
