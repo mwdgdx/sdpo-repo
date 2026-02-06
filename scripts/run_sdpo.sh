@@ -116,8 +116,14 @@ VERL_DIR="${SDPO_ROOT}/verl"
 # ============================================================================
 ENV_FILE="${SDPO_ROOT}/.env"
 if [ -f "$ENV_FILE" ]; then
+    # Save PRESET before loading .env (user's choice takes priority)
+    _SAVED_PRESET="$PRESET"
     echo "Loading configuration from ${ENV_FILE}..."
     source "$ENV_FILE"
+    # Restore PRESET if it was set before .env load
+    if [ -n "$_SAVED_PRESET" ]; then
+        export PRESET="$_SAVED_PRESET"
+    fi
 fi
 
 # ============================================================================
