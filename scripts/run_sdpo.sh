@@ -191,39 +191,41 @@ PRESET="${PRESET:-}"
 INTERACTIVE="${INTERACTIVE:-true}"
 
 # Apply preset from environment or interactive selection
+# Note: preset values OVERRIDE any existing env vars (including from .env)
 apply_preset() {
     case "$1" in
         0|"8xa6000"|"8xA6000")
             echo "✓ Selected: 8x A6000 48GB (LoRA Fine-tuning)"
-            export N_GPUS="${N_GPUS:-8}"
-            export LORA_RANK="${LORA_RANK:-32}"
-            export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
-            export MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-1}"
-            export GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.50}"
+            export N_GPUS=8
+            export LORA_RANK=32
+            export TRAIN_BATCH_SIZE=32
+            export MICRO_BATCH_SIZE=1
+            export GPU_MEM_UTIL=0.50
             ;;
         1|"8xa100"|"8xA100")
             echo "✓ Selected: 8x A100 80GB (Full Fine-tuning)"
-            export N_GPUS="${N_GPUS:-8}"
-            export LORA_RANK="${LORA_RANK:-0}"
-            export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
-            export MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-1}"
-            export GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.55}"
+            export N_GPUS=8
+            export LORA_RANK=0
+            export TRAIN_BATCH_SIZE=32
+            export MICRO_BATCH_SIZE=1
+            export GPU_MEM_UTIL=0.55
             ;;
         2|"4xa6000"|"4xA6000")
             echo "✓ Selected: 4x A6000 48GB (LoRA Fine-tuning)"
-            export N_GPUS="${N_GPUS:-4}"
-            export LORA_RANK="${LORA_RANK:-32}"
-            export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-16}"
-            export MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-1}"
-            export GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.50}"
+            export N_GPUS=4
+            export LORA_RANK=32
+            export TRAIN_BATCH_SIZE=16
+            export MICRO_BATCH_SIZE=1
+            export GPU_MEM_UTIL=0.50
             ;;
         *)
-            # Default: 4x A6000
-            export N_GPUS="${N_GPUS:-4}"
-            export LORA_RANK="${LORA_RANK:-32}"
-            export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-16}"
-            export MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-1}"
-            export GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.50}"
+            # Default: 8x A6000
+            echo "✓ Selected: 8x A6000 48GB (LoRA Fine-tuning) [default]"
+            export N_GPUS=8
+            export LORA_RANK=32
+            export TRAIN_BATCH_SIZE=32
+            export MICRO_BATCH_SIZE=1
+            export GPU_MEM_UTIL=0.50
             ;;
     esac
 }
