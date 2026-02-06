@@ -268,6 +268,10 @@ class TaskRunner:
             config: Training configuration object containing all parameters needed
                    for setting up and running the PPO training process.
         """
+        import sys
+        print(">>> [DEBUG] TaskRunner.run() STARTED", flush=True)
+        sys.stdout.flush()
+        
         # Print the initial configuration. `resolve=True` will evaluate symbolic values.
         from pprint import pprint
 
@@ -294,39 +298,50 @@ class TaskRunner:
         self.add_ref_policy_worker(config, actor_rollout_cls)
 
         # validate config
+        print(">>> [DEBUG] BEFORE validate_config", flush=True)
         validate_config(
             config=config,
             use_reference_policy=need_reference_policy(config),
             use_critic=need_critic(config),
         )
+        print(">>> [DEBUG] AFTER validate_config", flush=True)
 
         # Download the checkpoint from HDFS to the local machine.
         # `use_shm` determines whether to use shared memory, which could lead to faster model loading if turned on
+        print(f">>> [DEBUG] BEFORE copy_to_local model from {config.actor_rollout_ref.model.path}", flush=True)
         local_path = copy_to_local(
             config.actor_rollout_ref.model.path, use_shm=config.actor_rollout_ref.model.get("use_shm", False)
         )
+        print(f">>> [DEBUG] AFTER copy_to_local, local_path={local_path}", flush=True)
 
         # Instantiate the tokenizer and processor.
         from verl.utils import hf_processor, hf_tokenizer
 
+        print(">>> [DEBUG] BEFORE tokenizer init", flush=True)
         trust_remote_code = config.data.get("trust_remote_code", False)
         tokenizer = hf_tokenizer(local_path, trust_remote_code=trust_remote_code)
+        print(">>> [DEBUG] AFTER tokenizer init", flush=True)
         # Used for multimodal LLM, could be None
         processor = hf_processor(local_path, trust_remote_code=trust_remote_code, use_fast=True)
 
         # Load the reward manager for training and validation.
+        print(">>> [DEBUG] BEFORE load_reward_manager", flush=True)
         reward_fn = load_reward_manager(
             config, tokenizer, num_examine=0, **config.reward_model.get("reward_kwargs", {})
         )
         val_reward_fn = load_reward_manager(
             config, tokenizer, num_examine=1, **config.reward_model.get("reward_kwargs", {})
         )
+        print(">>> [DEBUG] AFTER load_reward_manager", flush=True)
 
+        print(">>> [DEBUG] BEFORE init_resource_pool_mgr", flush=True)
         resource_pool_manager = self.init_resource_pool_mgr(config)
+        print(">>> [DEBUG] AFTER init_resource_pool_mgr", flush=True)
 
         from verl.utils.dataset.rl_dataset import collate_fn
 
         # Create training and validation datasets.
+        print(">>> [DEBUG] BEFORE create_rl_dataset (train)", flush=True)
         train_dataset = create_rl_dataset(
             config.data.train_files,
             config.data,
@@ -335,6 +350,8 @@ class TaskRunner:
             is_train=True,
             max_samples=config.data.get("train_max_samples", -1),
         )
+        print(f">>> [DEBUG] AFTER create_rl_dataset (train), len={len(train_dataset)}", flush=True)
+        print(">>> [DEBUG] BEFORE create_rl_dataset (val)", flush=True)
         val_dataset = create_rl_dataset(
             config.data.val_files,
             config.data,
@@ -343,9 +360,11 @@ class TaskRunner:
             is_train=False,
             max_samples=config.data.get("val_max_samples", -1),
         )
+        print(f">>> [DEBUG] AFTER create_rl_dataset (val), len={len(val_dataset)}", flush=True)
         train_sampler = create_rl_sampler(config.data, train_dataset)
 
         # Initialize the PPO trainer.
+        print(">>> [DEBUG] BEFORE RayPPOTrainer init", flush=True)
         trainer = RayPPOTrainer(
             config=config,
             tokenizer=tokenizer,
@@ -360,11 +379,17 @@ class TaskRunner:
             collate_fn=collate_fn,
             train_sampler=train_sampler,
         )
+        print(">>> [DEBUG] AFTER RayPPOTrainer init", flush=True)
+        
         # Initialize the workers of the trainer.
+        print(">>> [DEBUG] BEFORE trainer.init_workers()", flush=True)
         trainer.init_workers()
+        print(">>> [DEBUG] AFTER trainer.init_workers()", flush=True)
 
         # Start the training process.
+        print(">>> [DEBUG] BEFORE trainer.fit()", flush=True)
         trainer.fit()
+        print(">>> [DEBUG] AFTER trainer.fit() - TRAINING COMPLETE", flush=True)
 
 
 def create_rl_dataset(data_paths, data_config, tokenizer, processor, is_train=True, max_samples: int = -1):

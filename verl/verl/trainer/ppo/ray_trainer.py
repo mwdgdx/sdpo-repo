@@ -911,7 +911,10 @@ class RayPPOTrainer:
         1. Ray resource pools from configuration
         2. Worker groups for each role (actor, critic, etc.)
         """
+        print(">>> [DEBUG] init_workers() ENTERED", flush=True)
+        print(">>> [DEBUG] Creating resource pool...", flush=True)
         self.resource_pool_manager.create_resource_pool()
+        print(">>> [DEBUG] Resource pool created", flush=True)
 
         self.resource_pool_to_cls = {pool: {} for pool in self.resource_pool_manager.resource_pool_dict.values()}
 
@@ -998,13 +1001,16 @@ class RayPPOTrainer:
         wg_kwargs["device_name"] = self.device_name
 
         for resource_pool, class_dict in self.resource_pool_to_cls.items():
+            print(f">>> [DEBUG] Creating worker_dict_cls for pool with classes: {list(class_dict.keys())}", flush=True)
             worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
             wg_dict = self.ray_worker_group_cls(
                 resource_pool=resource_pool,
                 ray_cls_with_init=worker_dict_cls,
                 **wg_kwargs,
             )
+            print(f">>> [DEBUG] Spawning workers for: {list(class_dict.keys())}", flush=True)
             spawn_wg = wg_dict.spawn(prefix_set=class_dict.keys())
+            print(f">>> [DEBUG] Spawned workers: {list(spawn_wg.keys())}", flush=True)
             all_wg.update(spawn_wg)
 
         if self.use_critic:
@@ -1037,8 +1043,10 @@ class RayPPOTrainer:
             self.rm_wg.init_model()
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
+        print(f">>> [DEBUG] BEFORE actor_rollout_wg.init_model() for role={actor_role}", flush=True)
         self.actor_rollout_wg = all_wg[str(actor_role)]
         self.actor_rollout_wg.init_model()
+        print(">>> [DEBUG] AFTER actor_rollout_wg.init_model() - vLLM should be initialized now", flush=True)
 
         if self.ref_in_actor:
             self.ref_policy_wg = self.actor_rollout_wg
@@ -1091,7 +1099,9 @@ class RayPPOTrainer:
         )
 
         # sleep all replicas to load checkpoint
+        print(">>> [DEBUG] BEFORE checkpoint_manager.sleep_replicas()", flush=True)
         self.checkpoint_manager.sleep_replicas()
+        print(">>> [DEBUG] init_workers() COMPLETED", flush=True)
 
     def _save_checkpoint(self):
         from verl.utils.fs import local_mkdir_safe
