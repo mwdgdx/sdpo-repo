@@ -397,9 +397,8 @@ EXTRA_ARGS="$EXTRA_ARGS data.train_batch_size=$TRAIN_BATCH_SIZE"
 EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.ppo_mini_batch_size=$TRAIN_BATCH_SIZE"
 EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.optim.lr=$LEARNING_RATE"
 
-# Explicitly pass data paths (in case env vars don't work with OmegaConf)
-EXTRA_ARGS="$EXTRA_ARGS 'data.train_files=[\"$TRAIN_DATA_PATH\"]'"
-EXTRA_ARGS="$EXTRA_ARGS 'data.val_files=[\"$VAL_DATA_PATH\"]'"
+# Data paths are read from environment variables in user_runpod.yaml
+# No need to override here - TRAIN_DATA_PATH and VAL_DATA_PATH are already exported
 
 TRAINING_SUCCESS=false
 python -m verl.trainer.main_ppo \
