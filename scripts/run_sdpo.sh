@@ -41,6 +41,50 @@
 set -e
 
 # ============================================================================
+# Auto-start in tmux session (so training survives SSH disconnect)
+# ============================================================================
+# Skip tmux if: already in tmux, NO_TMUX=true, or tmux not installed
+if [ -z "$TMUX" ] && [ "$NO_TMUX" != "true" ] && command -v tmux &> /dev/null; then
+    SESSION_NAME="sdpo_training"
+    
+    # Check if session already exists
+    if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+        echo "=============================================="
+        echo "tmux session '$SESSION_NAME' already exists!"
+        echo "=============================================="
+        echo ""
+        echo "Options:"
+        echo "  1. Attach to existing session:"
+        echo "     tmux attach -t $SESSION_NAME"
+        echo ""
+        echo "  2. Kill existing session and start new:"
+        echo "     tmux kill-session -t $SESSION_NAME"
+        echo "     bash $0 $@"
+        echo ""
+        echo "  3. Run without tmux (not recommended):"
+        echo "     NO_TMUX=true bash $0 $@"
+        echo ""
+        exit 1
+    fi
+    
+    echo "=============================================="
+    echo "Starting training in tmux session: $SESSION_NAME"
+    echo "=============================================="
+    echo ""
+    echo "Training will continue even if SSH disconnects!"
+    echo ""
+    echo "Useful commands:"
+    echo "  - Detach (keep running): Ctrl+B, then D"
+    echo "  - Reattach later:        tmux attach -t $SESSION_NAME"
+    echo "  - Kill session:          tmux kill-session -t $SESSION_NAME"
+    echo ""
+    sleep 2
+    
+    # Start tmux session and run this script inside it
+    exec tmux new-session -s "$SESSION_NAME" "NO_TMUX=true bash $0 $@; echo ''; echo 'Training finished. Press Enter to close.'; read"
+fi
+
+# ============================================================================
 # Get Workspace Root (auto-detect)
 # ============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
