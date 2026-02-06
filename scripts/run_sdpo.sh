@@ -41,6 +41,25 @@
 set -e
 
 # ============================================================================
+# Hardware selection BEFORE tmux (so user can interact)
+# ============================================================================
+if [ -z "$PRESET" ] && [ "$INTERACTIVE" != "false" ]; then
+    echo ""
+    echo "=============================================="
+    echo "Select Hardware Configuration"
+    echo "=============================================="
+    echo ""
+    echo "  [0] 8x A6000 48GB  │ LoRA │ batch=32 │ (Recommended)"
+    echo "  [1] 8x A100 80GB   │ Full │ batch=32 │ (Best quality)"
+    echo "  [2] 4x A6000 48GB  │ LoRA │ batch=16 │ (Budget)"
+    echo ""
+    read -p "Enter choice [0-2] (default: 0): " hw_choice
+    hw_choice="${hw_choice:-0}"
+    export PRESET="$hw_choice"
+    echo ""
+fi
+
+# ============================================================================
 # Auto-start in tmux session (so training survives SSH disconnect)
 # ============================================================================
 # Skip tmux if: already in tmux, NO_TMUX=true, or tmux not installed
@@ -80,8 +99,8 @@ if [ -z "$TMUX" ] && [ "$NO_TMUX" != "true" ] && command -v tmux &> /dev/null; t
     echo ""
     sleep 2
     
-    # Start tmux session and run this script inside it (with interactive terminal)
-    exec tmux new-session -s "$SESSION_NAME" \; send-keys "NO_TMUX=true bash $0 $@" Enter
+    # Start tmux session with PRESET already set
+    exec tmux new-session -s "$SESSION_NAME" "PRESET=$PRESET NO_TMUX=true bash $0 $@; echo ''; echo 'Training finished. Press Enter to close.'; read"
 fi
 
 # ============================================================================
@@ -209,25 +228,11 @@ apply_preset() {
     esac
 }
 
-# If PRESET is set, use it directly; otherwise show interactive menu
+# Apply preset (should already be set from menu above or environment)
 if [ -n "$PRESET" ]; then
     apply_preset "$PRESET"
-elif [ "$INTERACTIVE" = "true" ]; then
-    echo ""
-    echo "=============================================="
-    echo "Select Hardware Configuration"
-    echo "=============================================="
-    echo ""
-    echo "  [0] 8x A6000 48GB  │ LoRA │ batch=32 │ (Recommended)"
-    echo "  [1] 8x A100 80GB   │ Full │ batch=32 │ (Best quality)"
-    echo "  [2] 4x A6000 48GB  │ LoRA │ batch=16 │ (Budget)"
-    echo ""
-    read -p "Enter choice [0-2] (default: 0): " choice </dev/tty
-    choice="${choice:-0}"
-    echo ""
-    apply_preset "$choice"
 else
-    # Non-interactive (INTERACTIVE=false), use 8x A6000 as default
+    # Fallback default
     apply_preset "8xa6000"
 fi
 
