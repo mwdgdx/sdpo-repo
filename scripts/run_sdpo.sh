@@ -355,7 +355,7 @@ EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.optim.lr=$LEARNING_RATE"
 
 TRAINING_SUCCESS=false
 python -m verl.trainer.main_ppo \
-    --config-path verl/trainer/config \
+    --config-path "${VERL_DIR}/verl/trainer/config" \
     --config-name sdpo \
     user=user_runpod \
     $EXTRA_ARGS \
