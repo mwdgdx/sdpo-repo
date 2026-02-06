@@ -43,8 +43,9 @@ actor_rollout_ref:
     log_prob_micro_batch_size_per_gpu: ${oc.decode:${oc.env:MICRO_BATCH_SIZE,1}}
     max_num_batched_tokens: ${max_model_len}
     max_model_len: ${max_model_len}
-    # Disable CUDA graph compilation for faster startup (slightly slower inference)
-    enforce_eager: True
+    # Set to False for faster inference (but slower startup due to CUDA graph compilation)
+    # Set to True for faster startup (but ~10-20% slower inference)
+    enforce_eager: ${oc.decode:${oc.env:ENFORCE_EAGER,False}}
     val_kwargs:
       top_p: 0.95
       temperature: 0.6
