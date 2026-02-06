@@ -4,9 +4,11 @@ defaults:
   - _self_
 
 # MAX_PROMPT_LENGTH=2048
-# MAX_RESPONSE_LENGTH=4096
-# Reduced max_model_len for faster vLLM initialization
-max_model_len: 8192
+# MAX_RESPONSE_LENGTH=8192
+# MAX_FEEDBACK_LENGTH=8192
+# TEMPLATE_LENGTH=512  # heuristic upper bound, not enforced
+# MAX_MODEL_LEN=$((TEMPLATE_LENGTH + MAX_PROMPT_LENGTH + MAX_FEEDBACK_LENGTH + MAX_RESPONSE_LENGTH))
+max_model_len: 18944
 
 actor_rollout_ref:
   actor:
@@ -14,7 +16,7 @@ actor_rollout_ref:
     policy_loss:
       loss_mode: sdpo
     self_distillation:
-      max_reprompt_len: 6144
+      max_reprompt_len: 10240
       is_clip: 2.0
     optim:
       lr: 1e-5
