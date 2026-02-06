@@ -1,6 +1,6 @@
 defaults:
   - ppo_trainer
-  - user  # Override with: user=user_runpod on command line
+  - optional user: user_runpod  # Use user_runpod.yaml by default
   - _self_
 
 # MAX_PROMPT_LENGTH=2048

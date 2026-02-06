@@ -357,7 +357,6 @@ TRAINING_SUCCESS=false
 python -m verl.trainer.main_ppo \
     --config-path "${VERL_DIR}/verl/trainer/config" \
     --config-name sdpo \
-    user=user_runpod \
     $EXTRA_ARGS \
     "$@" && TRAINING_SUCCESS=true
 
