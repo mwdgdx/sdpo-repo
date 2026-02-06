@@ -227,7 +227,19 @@ echo "  source ${ENV_FILE}"
 #   - IMPORTANT: Set Pod Command to "sleep infinity" to prevent vLLM server auto-start!
 echo ""
 echo "=============================================="
-echo "Installing dependencies..."
+echo "Installing system tools..."
+echo "=============================================="
+
+# Install tmux for persistent sessions (training survives SSH disconnect)
+if ! command -v tmux &> /dev/null; then
+    echo "Installing tmux..."
+    apt-get update -qq && apt-get install -y -qq tmux
+fi
+echo "✓ tmux ready"
+
+echo ""
+echo "=============================================="
+echo "Installing Python dependencies..."
 echo "=============================================="
 
 # Check if running in verl Docker image
