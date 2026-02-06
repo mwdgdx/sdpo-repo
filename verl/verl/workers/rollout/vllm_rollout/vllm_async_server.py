@@ -383,18 +383,32 @@ class vLLMHttpServer:
             cmds[server_args.subparser].validate(server_args)
 
         # 3. launch server
+        print(f">>> [DEBUG] About to launch server, node_rank={self.node_rank}", flush=True)
         if self.node_rank == 0:
             self._master_sock.close()
+            print(">>> [DEBUG] node_rank=0, calling run_server()...", flush=True)
             await self.run_server(server_args)
+            print(">>> [DEBUG] run_server() returned", flush=True)
         else:
             # TODO: avoid connect before master_sock close
+            print(">>> [DEBUG] node_rank!=0, calling run_headless()...", flush=True)
             await asyncio.sleep(3)
             await self.run_headless(server_args)
+            print(">>> [DEBUG] run_headless() returned", flush=True)
 
     async def run_server(self, args: argparse.Namespace):
+        import sys
+        print(">>> [DEBUG] run_server() STARTED", flush=True)
+        sys.stdout.flush()
+        
+        print(">>> [DEBUG] Creating AsyncEngineArgs from CLI args...", flush=True)
         engine_args = AsyncEngineArgs.from_cli_args(args)
+        print(">>> [DEBUG] AsyncEngineArgs created", flush=True)
+        
         usage_context = UsageContext.OPENAI_API_SERVER
+        print(">>> [DEBUG] BEFORE create_engine_config()", flush=True)
         vllm_config = engine_args.create_engine_config(usage_context=usage_context)
+        print(">>> [DEBUG] AFTER create_engine_config()", flush=True)
         vllm_config.parallel_config.data_parallel_master_port = self._dp_master_port
 
         fn_args = set(dict(inspect.signature(AsyncLLM.from_vllm_config).parameters).keys())
@@ -404,7 +418,11 @@ class vLLMHttpServer:
         if "disable_log_stats" in fn_args:
             kwargs["disable_log_stats"] = engine_args.disable_log_stats
 
+        print(">>> [DEBUG] BEFORE AsyncLLM.from_vllm_config() - THIS IS WHERE CUDA KERNELS ARE COMPILED", flush=True)
+        sys.stdout.flush()
         engine_client = AsyncLLM.from_vllm_config(vllm_config=vllm_config, usage_context=usage_context, **kwargs)
+        print(">>> [DEBUG] AFTER AsyncLLM.from_vllm_config() - CUDA KERNEL COMPILATION DONE", flush=True)
+        sys.stdout.flush()
 
         # Don't keep the dummy data in memory
         await engine_client.reset_mm_cache()
@@ -431,14 +449,19 @@ class vLLMHttpServer:
             logger.info(f"Initializing a V1 LLM engine with config: {vllm_config}")
 
         self.engine = engine_client
+        print(">>> [DEBUG] BEFORE run_unvicorn()", flush=True)
         self._server_port, self._server_task = await run_unvicorn(app, args, self._server_address)
+        print(f">>> [DEBUG] AFTER run_unvicorn(), server_port={self._server_port}", flush=True)
 
     async def run_headless(self, args: argparse.Namespace):
         """Run headless server in a separate thread."""
+        print(">>> [DEBUG] run_headless() STARTED", flush=True)
 
         def run_headless_wrapper():
+            print(">>> [DEBUG] run_headless_wrapper() STARTED - calling vllm run_headless", flush=True)
             with SuppressSignalInThread():
                 run_headless(args)
+            print(">>> [DEBUG] run_headless_wrapper() DONE", flush=True)
 
         def on_run_headless_done(future: asyncio.Future):
             try:
