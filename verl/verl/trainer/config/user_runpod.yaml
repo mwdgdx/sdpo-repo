@@ -1,0 +1,77 @@
+# User configuration for RunPod
+# All paths are set via environment variables from run_sdpo.sh
+#
+# Hardware recommendations:
+#   - 8x A100 80GB: Full fine-tuning Qwen3-8B
+#   - 4x A100 80GB: LoRA fine-tuning Qwen3-8B (lora_rank=32)
+#   - 4x A10/4090 24GB: LoRA fine-tuning with smaller model (Qwen2.5-3B)
+
+defaults:
+  - _self_
+
+# Data paths - set by run_sdpo.sh based on TASK
+data:
+  train_files: ["${oc.env:TRAIN_DATA_PATH}"]
+  val_files: ["${oc.env:VAL_DATA_PATH}"]
+  filter_overlong_prompts: True
+  max_prompt_length: 2048
+  max_response_length: 8192
+  shuffle: True
+  trust_remote_code: True
+  apply_chat_template_kwargs: {"enable_thinking": false}
+
+actor_rollout_ref:
+  actor:
+    ppo_micro_batch_size_per_gpu: ${oc.env:MICRO_BATCH_SIZE,1}
+    ppo_max_token_len_per_gpu: ${max_model_len}
+    clip_ratio_high: 0.28
+    use_kl_loss: False
+  model:
+    path: ${oc.env:MODEL_PATH}
+    trust_remote_code: True
+    # LoRA configuration - set LORA_RANK > 0 to enable
+    lora_rank: ${oc.env:LORA_RANK,0}
+    lora_alpha: ${oc.env:LORA_ALPHA,32}
+    target_modules: all-linear
+    # Enable gradient checkpointing to save memory
+    enable_gradient_checkpointing: True
+  ref:
+    log_prob_micro_batch_size_per_gpu: ${oc.env:MICRO_BATCH_SIZE,1}
+  rollout:
+    name: vllm
+    gpu_memory_utilization: ${oc.env:GPU_MEM_UTIL,0.55}
+    log_prob_micro_batch_size_per_gpu: ${oc.env:MICRO_BATCH_SIZE,1}
+    max_num_batched_tokens: ${max_model_len}
+    max_model_len: ${max_model_len}
+    val_kwargs:
+      top_p: 0.95
+      temperature: 0.6
+      n: 4
+      do_sample: True
+
+algorithm:
+  use_kl_in_reward: False
+
+# Custom reward function path - set by run_sdpo.sh
+custom_reward_function:
+  path: ${oc.env:REWARD_FN_PATH}
+
+critic:
+  model:
+    path: ${oc.env:MODEL_PATH}
+
+reward_model:
+  use_reward_loop: False
+
+trainer:
+  project_name: ${oc.env:PROJECT_NAME}
+  group_name: ${oc.env:EXPERIMENT_NAME}
+  experiment_name: ${oc.env:EXPERIMENT_NAME}
+  n_gpus_per_node: ${oc.env:N_GPUS}
+  nnodes: 1
+  save_freq: ${oc.env:SAVE_FREQ}
+  test_freq: ${oc.env:TEST_FREQ}
+  # Only keep latest N checkpoints to save disk space (old ones auto-deleted)
+  max_actor_ckpt_to_keep: ${oc.env:MAX_CKPT_TO_KEEP,2}
+  total_epochs: ${oc.env:TOTAL_EPOCHS}
+  default_local_dir: ${oc.env:CKPT_DIR}/${trainer.experiment_name}
