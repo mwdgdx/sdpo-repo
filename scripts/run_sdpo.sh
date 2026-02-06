@@ -80,8 +80,8 @@ if [ -z "$TMUX" ] && [ "$NO_TMUX" != "true" ] && command -v tmux &> /dev/null; t
     echo ""
     sleep 2
     
-    # Start tmux session and run this script inside it
-    exec tmux new-session -s "$SESSION_NAME" "NO_TMUX=true bash $0 $@; echo ''; echo 'Training finished. Press Enter to close.'; read"
+    # Start tmux session and run this script inside it (with interactive terminal)
+    exec tmux new-session -s "$SESSION_NAME" \; send-keys "NO_TMUX=true bash $0 $@" Enter
 fi
 
 # ============================================================================
