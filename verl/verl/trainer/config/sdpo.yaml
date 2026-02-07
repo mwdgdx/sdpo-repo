@@ -12,16 +12,19 @@ max_model_len: 18944
 
 actor_rollout_ref:
   actor:
-    ppo_mini_batch_size: 32 # TODO: make slightly off-policy in the future; use same as baseline; perhaps make 1 again for fastest convergence
+    # SDPO experiments use ppo_mini_batch_size=1 for fully on-policy updates
+    ppo_mini_batch_size: 1
+    # Disable remove_padding for SDPO (required for full-logit/topk distillation)
+    use_remove_padding: false
     policy_loss:
       loss_mode: sdpo
     self_distillation:
       # Distillation settings (matching SDPO experiments/rich_feedback/run_sdpo.sh)
       alpha: 1.0  # reverse KL
       full_logit_distillation: true
-      distillation_topk: 20  # experiments use top-20, not default 100
+      distillation_topk: 20  # experiments use top-20
       distillation_add_tail: true
-      teacher_update_rate: 0.01  # EMA rate from experiments
+      teacher_update_rate: 0.01  # EMA rate from experiments (ema_update_rate)
       # Reprompting settings
       max_reprompt_len: 10240
       is_clip: 2.0
@@ -49,10 +52,14 @@ actor_rollout_ref:
 
         {feedback_raw}
     optim:
-      lr: 1e-5
+      # SDPO experiments use lr=1e-6 (10x smaller than typical PPO)
+      lr: 1e-6
+      lr_warmup_steps: 0  # No warmup in SDPO experiments
   rollout:
     n: 8
     calculate_log_probs: True
+    val_kwargs:
+      n: 4  # SDPO experiments use 4 for validation
 
 algorithm:
   adv_estimator: grpo # disables critic

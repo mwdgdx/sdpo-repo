@@ -118,8 +118,8 @@ export SAVE_FREQ="${SAVE_FREQ:-10}"
 export TEST_FREQ="${TEST_FREQ:-5}"
 export MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-2}"
 
-# Training settings
-export LEARNING_RATE="${LEARNING_RATE:-1e-5}"
+# Training settings (matching SDPO experiments/rich_feedback/run_sdpo.sh)
+export LEARNING_RATE="${LEARNING_RATE:-1e-6}"  # SDPO uses 1e-6, not 1e-5!
 
 # WandB configuration
 export WANDB_PROJECT="${WANDB_PROJECT:-$PROJECT_NAME}"
@@ -237,9 +237,10 @@ if [ "$USE_WANDB" = "false" ]; then
     EXTRA_ARGS="$EXTRA_ARGS trainer.logger=[console]"
 fi
 
-# Training parameters overrides
+# Training parameters overrides (matching SDPO experiments)
 EXTRA_ARGS="$EXTRA_ARGS data.train_batch_size=$TRAIN_BATCH_SIZE"
-EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.ppo_mini_batch_size=$TRAIN_BATCH_SIZE"
+# NOTE: ppo_mini_batch_size=1 is set in sdpo.yaml for on-policy training
+# Do NOT override it here (SDPO experiments use 1, not $TRAIN_BATCH_SIZE)
 EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.optim.lr=$LEARNING_RATE"
 
 TRAINING_SUCCESS=false
