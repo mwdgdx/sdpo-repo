@@ -123,10 +123,10 @@ class SelfDistillationConfig(BaseConfig):
     # SDPO paper experiments use alpha=1.0 (pure reverse KL)
     alpha: float = 1.0
     teacher_regularization: str = "ema"
-    teacher_update_rate: float = 0.05
-    # Full-logit distillation (SDPO default: True with topk=100)
+    teacher_update_rate: float = 0.01  # SDPO experiments use 0.01
+    # Full-logit distillation (SDPO experiments use topk=20)
     full_logit_distillation: bool = True
-    distillation_topk: Optional[int] = 100
+    distillation_topk: Optional[int] = 20  # experiments use 20, not 100
     distillation_add_tail: bool = True
     is_clip: Optional[float] = 2.0
     max_reprompt_len: int = 10240

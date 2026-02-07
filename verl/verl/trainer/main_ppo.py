@@ -15,12 +15,15 @@
 Note that we don't combine the main with ray_trainer as ray_trainer is used by other mpain.
 """
 
+import logging
 import os
 import socket
 
 import hydra
 import ray
 from omegaconf import OmegaConf
+
+logger = logging.getLogger(__name__)
 
 from verl.experimental.dataset.sampler import AbstractSampler
 from verl.trainer.constants_ppo import get_ppo_ray_runtime_env
@@ -126,6 +129,21 @@ class TaskRunner:
         from verl.trainer.ppo.ray_trainer import Role
 
         use_legacy_worker_impl = config.trainer.get("use_legacy_worker_impl", "auto")
+        
+        # SDPO: Check if self-distillation requires ref policy in actor worker
+        self_distillation_cfg = config.actor_rollout_ref.actor.get("self_distillation", None)
+        loss_mode = config.actor_rollout_ref.actor.policy_loss.get("loss_mode", "vanilla")
+        self_distillation_needs_ref = self_distillation_cfg is not None and loss_mode == "sdpo"
+        if self_distillation_needs_ref and need_reference_policy(config):
+            logger.warning(
+                "SDPO with self_distillation overrides need_reference_policy. "
+                "Ref policy will be included in actor worker."
+            )
+        if self_distillation_needs_ref and use_legacy_worker_impl == "disable":
+            raise ValueError(
+                "SDPO self-distillation requires legacy worker implementation. "
+                "Set trainer.use_legacy_worker_impl='auto' or 'enable'."
+            )
 
         # use new model engine implementation
         if use_legacy_worker_impl == "disable":
@@ -165,8 +183,10 @@ class TaskRunner:
         else:
             raise NotImplementedError
 
-        self.role_worker_mapping[Role.ActorRollout] = ray.remote(actor_rollout_cls)
-        self.mapping[Role.ActorRollout] = "global_pool"
+        # SDPO: Use ActorRolloutRef role if self-distillation needs ref policy
+        actor_role = Role.ActorRolloutRef if self_distillation_needs_ref else Role.ActorRollout
+        self.role_worker_mapping[actor_role] = ray.remote(actor_rollout_cls)
+        self.mapping[actor_role] = "global_pool"
         return actor_rollout_cls, ray_worker_group_cls
 
     def add_critic_worker(self, config):

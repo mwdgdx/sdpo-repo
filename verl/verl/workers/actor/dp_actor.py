@@ -230,6 +230,12 @@ class DataParallelPPOActor(BasePPOActor):
                 position_ids = position_ids.transpose(0, 1)  # (bsz, 4, seqlen) -> (4, bsz, seqlen)
 
             if self.use_remove_padding:
+                # SDPO: rmpad branch currently does not support full-logit or top-k distillation
+                if compute_all_logps or use_topk:
+                    raise NotImplementedError(
+                        "Full-logit distillation and top-k distillation are not supported with use_remove_padding=True. "
+                        "Please disable remove_padding or disable full_logit_distillation/distillation_topk."
+                    )
                 input_ids_rmpad, indices, cu_seqlens, *_ = unpad_input(
                     input_ids.unsqueeze(-1), attention_mask
                 )  # input_ids_rmpad (total_nnz, ...)
@@ -436,6 +442,18 @@ class DataParallelPPOActor(BasePPOActor):
                     logits.div_(temperature)
                     logits = logits[:, -response_length - 1 : -1, :]  # (bsz, response_length, vocab_size)
                     log_probs = logprobs_from_logits(logits, micro_batch["responses"])
+                    # SDPO: Compute all logps for full-logit distillation
+                    if compute_all_logps:
+                        all_logps = torch.log_softmax(logits, dim=-1)
+                    # SDPO: Compute topk logps for top-k distillation
+                    if use_topk:
+                        if topk_indices is None:
+                            topk = min(distill_topk, logits.size(-1))
+                            topk_logits, topk_indices = torch.topk(logits, topk, dim=-1)
+                        else:
+                            topk_logits = torch.gather(logits, dim=-1, index=topk_indices)
+                        logsumexp = torch.logsumexp(logits, dim=-1, keepdim=True)
+                        topk_logps = topk_logits - logsumexp
                     if calculate_entropy:
                         if not self.config.entropy_checkpointing:
                             entropy = verl_F.entropy_from_logits(logits)  # (bsz, response_length)
@@ -454,6 +472,13 @@ class DataParallelPPOActor(BasePPOActor):
                 outputs["entropys"] = entropy
             if calculate_sum_pi_squared:
                 outputs["sum_pi_squared"] = sum_pi_squared
+            # SDPO: Include logit distillation outputs
+            if compute_all_logps:
+                outputs["all_logps"] = all_logps
+            if use_topk:
+                outputs["topk_logps"] = topk_logps
+                if return_topk_indices:
+                    outputs["topk_indices"] = topk_indices
             return outputs
 
     def _optimizer_step(self):
@@ -666,12 +691,33 @@ class DataParallelPPOActor(BasePPOActor):
                     else:
                         loss_scale_factor = 1 / self.gradient_accumulation
 
+                    # SDPO: Check teacher regularization mode and prepare logit distillation settings
+                    teacher_regularization = self_distillation_cfg.get("teacher_regularization", "ema") if self_distillation_enabled else None
+                    if teacher_regularization == "trust-region" and self.use_fused_kernels:
+                        raise ValueError("trust-region teacher requires disabling fused kernels to access logits.")
+                    
+                    # SDPO: Determine if we need full-logit or top-k distillation
+                    return_all_logps = False
+                    distill_topk = None
+                    if self_distillation_enabled and self_distillation_cfg:
+                        full_logit = self_distillation_cfg.get("full_logit_distillation", False)
+                        topk_val = self_distillation_cfg.get("distillation_topk", None)
+                        return_all_logps = full_logit and not topk_val
+                        distill_topk = topk_val if full_logit else None
+
                     # all return: (bsz, response_length)
                     outputs = self._forward_micro_batch(
-                        model_inputs, temperature=temperature, calculate_entropy=calculate_entropy
+                        model_inputs,
+                        temperature=temperature,
+                        calculate_entropy=calculate_entropy,
+                        return_all_logps=return_all_logps,
+                        distill_topk=distill_topk,
                     )
                     log_prob = outputs["log_probs"]
                     entropy = outputs["entropys"] if calculate_entropy else None
+                    student_all_logps = outputs.get("all_logps") if return_all_logps else None
+                    student_topk_logps = outputs.get("topk_logps") if distill_topk else None
+                    student_topk_indices = outputs.get("topk_indices") if distill_topk else None
 
                     # for fully_async_policy
                     if hasattr(self.config, "use_rollout_log_probs") and self.config.use_rollout_log_probs:
@@ -698,14 +744,23 @@ class DataParallelPPOActor(BasePPOActor):
                             "position_ids": model_inputs["teacher_position_ids"],
                         }
                         teacher_model = self.teacher_module or self.actor_module
+                        if teacher_regularization == "trust-region" and (
+                            self.teacher_module is None or self.teacher_module is self.actor_module
+                        ):
+                            raise ValueError("trust-region teacher requires a separate teacher_module in the actor worker.")
                         with torch.no_grad():
                             teacher_outputs = self._forward_micro_batch(
                                 teacher_inputs,
                                 temperature=temperature,
                                 calculate_entropy=False,
+                                return_all_logps=return_all_logps,
+                                distill_topk=distill_topk,
+                                topk_indices=student_topk_indices,
                                 module=teacher_model,
                             )
                         teacher_log_prob = teacher_outputs["log_probs"]
+                        teacher_all_logps = teacher_outputs.get("all_logps") if return_all_logps else None
+                        teacher_topk_logps = teacher_outputs.get("topk_logps") if distill_topk else None
                         
                         pg_loss, pg_metrics = compute_self_distillation_loss(
                             student_log_probs=log_prob,
@@ -713,6 +768,10 @@ class DataParallelPPOActor(BasePPOActor):
                             response_mask=response_mask,
                             self_distillation_config=self_distillation_cfg,
                             old_log_probs=old_log_prob,
+                            student_all_log_probs=student_all_logps,
+                            teacher_all_log_probs=teacher_all_logps,
+                            student_topk_log_probs=student_topk_logps,
+                            teacher_topk_log_probs=teacher_topk_logps,
                             self_distillation_mask=self_distillation_mask,
                             loss_agg_mode=loss_agg_mode,
                             rollout_is_weights=rollout_is_weights,

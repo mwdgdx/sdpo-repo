@@ -24,8 +24,8 @@ DEFAULT_TIMEOUT = 1
 TIMEOUT_SCALER = 1.0
 FORMAT_PENALTY = False
 # Maximum number of test processes to run in parallel (None = all parallel, 1 = sequential)
-# Setting to 8 balances speed and memory pressure
-MAX_PARALLEL_TESTS = 8
+# Setting to 20 for faster execution; OOM errors are likely from user code, not machine limits
+MAX_PARALLEL_TESTS = 20
 
 FILENAME = "Solution.py"
 TESTS_FILENAME = "Tests.py"

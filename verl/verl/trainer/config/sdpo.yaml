@@ -16,6 +16,13 @@ actor_rollout_ref:
     policy_loss:
       loss_mode: sdpo
     self_distillation:
+      # Distillation settings (matching SDPO experiments/rich_feedback/run_sdpo.sh)
+      alpha: 1.0  # reverse KL
+      full_logit_distillation: true
+      distillation_topk: 20  # experiments use top-20, not default 100
+      distillation_add_tail: true
+      teacher_update_rate: 0.01  # EMA rate from experiments
+      # Reprompting settings
       max_reprompt_len: 10240
       is_clip: 2.0
       success_reward_threshold: 1.0

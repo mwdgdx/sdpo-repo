@@ -20,6 +20,7 @@ This trainer supports model-agonistic model initialization with huggingface
 
 import json
 import os
+import re
 import uuid
 from collections import defaultdict
 from copy import deepcopy
@@ -63,6 +64,7 @@ from verl.utils.rollout_skip import RolloutSkip
 from verl.utils.seqlen_balancing import calculate_workload, get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.torch_functional import masked_mean
 from verl.utils.tracking import ValidationGenerationsLogger
+from verl.utils.model import compute_position_id_with_mask
 from verl.workers.config import FSDPEngineConfig
 from verl.workers.utils.padding import left_right_2_no_padding, no_padding_2_padding
 
@@ -583,7 +585,6 @@ class RayPPOTrainer:
     @staticmethod
     def _remove_thinking_trace(text: str) -> str:
         """Remove <think>...</think> tags and their content from text."""
-        import re
         return re.sub(r'<think>.*?</think>\s*', '', text, flags=re.DOTALL)
 
     def _get_solution(
