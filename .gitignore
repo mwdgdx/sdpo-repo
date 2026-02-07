@@ -5,3 +5,4 @@
 .venv_data/
 __pycache__/
 datasets/*.json
+datasets/*.json

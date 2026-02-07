@@ -243,7 +243,7 @@ EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.ppo_mini_batch_size=$TRAIN_BATCH
 EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.optim.lr=$LEARNING_RATE"
 
 TRAINING_SUCCESS=false
-python -m verl.trainer.main_ppo \
+python3 -m verl.trainer.main_ppo \
     --config-path "${VERL_DIR}/verl/trainer/config" \
     --config-name sdpo \
     $EXTRA_ARGS \
@@ -273,7 +273,7 @@ if [ "$UPLOAD_CHECKPOINT" = "true" ] && [ "$TRAINING_SUCCESS" = "true" ]; then
         echo "Latest checkpoint: $LATEST_CKPT"
         echo "Uploading to: $HF_REPO_ID"
         
-        python "${SCRIPT_DIR}/push_to_hub.py" \
+        python3 "${SCRIPT_DIR}/push_to_hub.py" \
             --checkpoint_path "$LATEST_CKPT" \
             --repo_id "$HF_REPO_ID" \
             --token "$HF_TOKEN" \

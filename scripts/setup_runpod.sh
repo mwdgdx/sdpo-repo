@@ -186,22 +186,22 @@ echo "Installing Python dependencies..."
 echo "=============================================="
 
 # Check if running in verl Docker image
-if python -c "import vllm" 2>/dev/null; then
+if python3 -c "import vllm" 2>/dev/null; then
     echo "✓ vllm already installed"
 else
     echo "vllm not found, installing heavy dependencies..."
-    pip install vllm ray[default] --quiet
-    pip install flash-attn --no-build-isolation --quiet || echo "flash-attn installation failed"
+    pip3 install vllm ray[default] --quiet
+    pip3 install flash-attn --no-build-isolation --quiet || echo "flash-attn installation failed"
 fi
 
 # Install verl with local SDPO modifications (ALWAYS needed!)
 echo "Installing verl with SDPO modifications..."
 cd "$VERL_DIR"
-pip install --no-deps -e . --quiet
+pip3 install --no-deps -e . --quiet
 
 # Install dependencies that may be missing
 echo "Installing additional dependencies..."
-pip install --quiet \
+pip3 install --quiet \
     hydra-core \
     omegaconf \
     peft \
@@ -216,12 +216,12 @@ echo "✓ Dependencies ready!"
 # Verify critical imports
 echo ""
 echo "Verifying installations..."
-python -c "import verl; print('✓ verl')" || echo "❌ verl import failed"
-python -c "import vllm; print('✓ vllm')" || echo "❌ vllm import failed"
-python -c "import ray; print('✓ ray')" || echo "❌ ray import failed"
-python -c "import hydra; print('✓ hydra')" || echo "❌ hydra import failed"
-python -c "import peft; print('✓ peft')" || echo "❌ peft import failed"
-python -c "import wandb; print('✓ wandb')" || echo "❌ wandb import failed"
+python3 -c "import verl; print('✓ verl')" || echo "❌ verl import failed"
+python3 -c "import vllm; print('✓ vllm')" || echo "❌ vllm import failed"
+python3 -c "import ray; print('✓ ray')" || echo "❌ ray import failed"
+python3 -c "import hydra; print('✓ hydra')" || echo "❌ hydra import failed"
+python3 -c "import peft; print('✓ peft')" || echo "❌ peft import failed"
+python3 -c "import wandb; print('✓ wandb')" || echo "❌ wandb import failed"
 
 # ============================================================================
 # Create checkpoint directory
