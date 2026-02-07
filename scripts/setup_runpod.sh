@@ -208,7 +208,10 @@ pip3 install --quiet \
     datasets \
     wandb \
     huggingface_hub \
-    accelerate
+    accelerate \
+    "tensordict>=0.8.0,<=0.10.0,!=0.9.0" \
+    codetiming \
+    pyarrow
 
 echo ""
 echo "✓ Dependencies ready!"
