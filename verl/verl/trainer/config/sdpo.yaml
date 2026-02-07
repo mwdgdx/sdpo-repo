@@ -21,6 +21,26 @@ actor_rollout_ref:
       success_reward_threshold: 1.0
       include_environment_feedback: true
       dont_reprompt_on_self_success: true
+      remove_thinking_from_demonstration: true  # Remove <think>...</think> from demonstrations
+      environment_feedback_only_without_solution: true  # Only use feedback when no solution available
+      # Reprompting template - combines prompt, solution section, and feedback section
+      reprompt_template: |-
+        {prompt}{solution}{feedback}
+
+        Correctly solve the original question.
+      # Solution template - formats successful previous attempts
+      solution_template: |-
+
+        Correct solution:
+
+        {successful_previous_attempt}
+
+      # Feedback template - formats environment feedback from failed attempts
+      feedback_template: |-
+
+        The following is feedback from your unsuccessful earlier attempt:
+
+        {feedback_raw}
     optim:
       lr: 1e-5
   rollout:

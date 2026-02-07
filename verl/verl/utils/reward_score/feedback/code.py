@@ -23,6 +23,9 @@ MAX_ADDITIONAL_MEMORY_BYTES = 1024 * 1024 * 1024  # 1GB
 DEFAULT_TIMEOUT = 1
 TIMEOUT_SCALER = 1.0
 FORMAT_PENALTY = False
+# Maximum number of test processes to run in parallel (None = all parallel, 1 = sequential)
+# Setting to 8 balances speed and memory pressure
+MAX_PARALLEL_TESTS = 8
 
 FILENAME = "Solution.py"
 TESTS_FILENAME = "Tests.py"
@@ -569,8 +572,8 @@ def run_tests_for_one_example(test_cases, completion, send_conn, sparse_rewards,
 
         try:
             send_conn.send(record)
-        except Exception:
-            print(f"[{test_idx}] SEND ERROR: {type(e).__name__}: {e}\n")
+        except Exception as send_err:
+            print(f"[{test_idx}] SEND ERROR: {type(send_err).__name__}: {send_err}\n")
 
         # End INNER block
 
@@ -762,56 +765,67 @@ def run_tests(test_cases: dict, solution, sparse_rewards, max_test_cases):
     timeout_per_test_case = float(test_cases["time_limit"]) if test_cases["time_limit"] is not None else DEFAULT_TIMEOUT
 
     records = []
-    process_data = []
+    
+    # Determine batch size for parallel execution
+    batch_size = MAX_PARALLEL_TESTS if MAX_PARALLEL_TESTS is not None else num_test_cases
+    
+    # Process tests in batches to limit memory pressure
+    for batch_start in range(0, num_test_cases, batch_size):
+        batch_end = min(batch_start + batch_size, num_test_cases)
+        process_data = []
+        
+        # Start processes for this batch
+        for test_idx in range(batch_start, batch_end):
+            parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
+            p = multiprocessing.Process(target=run_tests_for_one_example, args=(test_cases, completion, child_conn, sparse_rewards, test_idx))
+            p.start()
+            child_conn.close()  # Close in parent to avoid resource leaks
+            process_data.append({"process": p, "parent_conn": parent_conn, "test_idx": test_idx})
 
-    for test_idx in range(num_test_cases):
-        parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
-        p = multiprocessing.Process(target=run_tests_for_one_example, args=(test_cases, completion, child_conn, sparse_rewards, test_idx))
-        p.start()
-        child_conn.close()  # Close in parent to avoid resource leaks
-        process_data.append({"process": p, "parent_conn": parent_conn})
+        start_time = time.time()
+        
+        # Collect results for this batch
+        for data in process_data:
+            p = data["process"]
+            parent_conn = data["parent_conn"]
+            test_idx = data["test_idx"]
 
-    start_time = time.time()
-    for test_idx, data in enumerate(process_data):
-        p = data["process"]
-        parent_conn = data["parent_conn"]
-
-        # timeout for a single test; since all tests have started in parallel, we need to calculate the remaining time for each test
-        timeout_this_test = max(0, timeout_per_test_case * TIMEOUT_SCALER + 1 - (time.time() - start_time))
-        if parent_conn.poll(timeout_this_test):
-            try:
-                # receive the result from the child process
-                result = parent_conn.recv()
-            except Exception as e:
-                # any other error (eg process died without sending a result)
+            # timeout for a single test; since all tests have started in parallel, we need to calculate the remaining time for each test
+            timeout_this_test = max(0, timeout_per_test_case * TIMEOUT_SCALER + 1 - (time.time() - start_time))
+            if parent_conn.poll(timeout_this_test):
+                try:
+                    # receive the result from the child process
+                    result = parent_conn.recv()
+                except Exception as e:
+                    # any other error (eg process died without sending a result)
+                    result = {
+                        "test_idx": test_idx,
+                        "input": test_cases["inputs"][test_idx],
+                        "expected": test_cases["outputs"][test_idx],
+                        "actual": f"Process Error: {_short_trace(e)}",
+                        "passed": False,
+                        "debug": "",
+                        "time": float("inf"),
+                    }
+            else:
+                # process timed out
                 result = {
                     "test_idx": test_idx,
                     "input": test_cases["inputs"][test_idx],
                     "expected": test_cases["outputs"][test_idx],
-                    "actual": f"Process Error: {_short_trace(e)}",
+                    "actual": TIMEOUT,
                     "passed": False,
                     "debug": "",
                     "time": float("inf"),
                 }
-        else:
-            # process timed out
-            result = {
-                "test_idx": test_idx,
-                "input": test_cases["inputs"][test_idx],
-                "expected": test_cases["outputs"][test_idx],
-                "actual": TIMEOUT,
-                "passed": False,
-                "debug": "",
-                "time": float("inf"),
-            }
 
-        records.append(result)
+            records.append(result)
 
-        # clean-up process
-        p.join(timeout=0)
-        if p.is_alive():
-            p.kill()
-            p.join()
+            # clean-up process
+            p.join(timeout=0)
+            if p.is_alive():
+                p.kill()
+                p.join()
 
     assert len(records) == num_test_cases
     return records

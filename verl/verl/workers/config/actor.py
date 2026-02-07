@@ -25,7 +25,14 @@ from .engine import FSDPEngineConfig, McoreEngineConfig
 from .model import HFModelConfig
 from .optimizer import OptimizerConfig
 
-__all__ = ["PolicyLossConfig", "RouterReplayConfig", "SelfDistillationConfig", "ActorConfig", "FSDPActorConfig", "McoreActorConfig"]
+__all__ = [
+    "PolicyLossConfig",
+    "RouterReplayConfig",
+    "SelfDistillationConfig",
+    "ActorConfig",
+    "FSDPActorConfig",
+    "McoreActorConfig",
+]
 
 
 @dataclass
@@ -112,22 +119,38 @@ class SelfDistillationConfig(BaseConfig):
         reprompt_template (str): Template for combining prompt, solution, and feedback.
     """
     
+    # KL interpolation: 0.0=forward KL, 1.0=reverse KL, in-between=JSD
+    # SDPO paper experiments use alpha=1.0 (pure reverse KL)
     alpha: float = 1.0
     teacher_regularization: str = "ema"
-    teacher_update_rate: float = 0.0
-    full_logit_distillation: bool = False
-    distillation_topk: Optional[int] = None
-    distillation_add_tail: bool = False
-    is_clip: Optional[float] = None
+    teacher_update_rate: float = 0.05
+    # Full-logit distillation (SDPO default: True with topk=100)
+    full_logit_distillation: bool = True
+    distillation_topk: Optional[int] = 100
+    distillation_add_tail: bool = True
+    is_clip: Optional[float] = 2.0
     max_reprompt_len: int = 10240
-    success_reward_threshold: float = 1.0
+    reprompt_truncation: str = "right"  # "left", "right", "error"
+    success_reward_threshold: float = 0.5
     include_environment_feedback: bool = True
     dont_reprompt_on_self_success: bool = True
-    remove_thinking_from_demonstration: bool = False
-    environment_feedback_only_without_solution: bool = False
-    solution_template: str = "A successful previous attempt:\n{successful_previous_attempt}"
-    feedback_template: str = "Environment feedback from a failed attempt:\n{feedback_raw}"
-    reprompt_template: str = "{prompt}\n\n{solution}\n\n{feedback}"
+    remove_thinking_from_demonstration: bool = True
+    environment_feedback_only_without_solution: bool = True
+    # Templates matching SDPO original
+    reprompt_template: str = (
+        "{prompt}{solution}{feedback}\n\n"
+        "Correctly solve the original question.\n"
+    )
+    solution_template: str = (
+        "\n"
+        "Correct solution:\n\n"
+        "{successful_previous_attempt}\n\n"
+    )
+    feedback_template: str = (
+        "\n"
+        "The following is feedback from your unsuccessful earlier attempt:\n\n"
+        "{feedback_raw}\n\n"
+    )
     
     def __post_init__(self):
         """Validate self-distillation configuration."""
