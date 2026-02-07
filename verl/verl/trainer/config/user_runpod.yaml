@@ -1,10 +1,7 @@
-# User configuration for RunPod
+# User configuration for 8x H100
 # All paths are set via environment variables from run_sdpo.sh
 #
-# Hardware recommendations:
-#   - 8x A100 80GB: Full fine-tuning Qwen3-8B
-#   - 4x A100 80GB: LoRA fine-tuning Qwen3-8B (lora_rank=32)
-#   - 4x A10/4090 24GB: LoRA fine-tuning with smaller model (Qwen2.5-3B)
+# Configuration: 8x H100 80GB, Full Fine-tuning, Qwen3-4B
 
 defaults:
   - _self_
@@ -69,7 +66,7 @@ trainer:
   project_name: ${oc.env:PROJECT_NAME}
   group_name: ${oc.env:EXPERIMENT_NAME}
   experiment_name: ${oc.env:EXPERIMENT_NAME}
-  n_gpus_per_node: ${oc.decode:${oc.env:N_GPUS,4}}
+  n_gpus_per_node: ${oc.decode:${oc.env:N_GPUS,8}}
   nnodes: 1
   save_freq: ${oc.decode:${oc.env:SAVE_FREQ,10}}
   test_freq: ${oc.decode:${oc.env:TEST_FREQ,5}}
