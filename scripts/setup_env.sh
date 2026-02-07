@@ -176,9 +176,17 @@ echo "=============================================="
 # Install tmux for persistent sessions (training survives SSH disconnect)
 if ! command -v tmux &> /dev/null; then
     echo "Installing tmux..."
-    apt-get update -qq && apt-get install -y -qq tmux 2>/dev/null || sudo apt-get update -qq && sudo apt-get install -y -qq tmux
+    if [ "$(id -u)" = "0" ]; then
+        apt-get update -qq && apt-get install -y -qq tmux 2>/dev/null || echo "⚠ tmux install failed (optional)"
+    else
+        sudo apt-get update -qq && sudo apt-get install -y -qq tmux 2>/dev/null || echo "⚠ tmux install failed (optional)"
+    fi
 fi
-echo "✓ tmux ready"
+if command -v tmux &> /dev/null; then
+    echo "✓ tmux ready"
+else
+    echo "⚠ tmux not available (training will work, but won't survive SSH disconnect)"
+fi
 
 echo ""
 echo "=============================================="
