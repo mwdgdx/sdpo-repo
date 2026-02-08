@@ -679,6 +679,7 @@ class DataParallelPPOActor(BasePPOActor):
             "actor/pg_loss": 0.0,
             "actor/kl_loss": 0.0,
         }
+        did_update = False  # Track if at least one successful gradient update occurred
         for _ in range(self.config.ppo_epochs):
             for batch_idx, mini_batch in enumerate(mini_batches):
                 if self.config.use_dynamic_bsz:
@@ -863,7 +864,12 @@ class DataParallelPPOActor(BasePPOActor):
                     append_to_dict(metrics, micro_batch_metrics)
 
                 grad_norm = self._optimizer_step()
+                if torch.isfinite(grad_norm).item():
+                    did_update = True
                 mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
                 append_to_dict(metrics, mini_batch_metrics)
         self.actor_optimizer.zero_grad()
+        # SDPO: Update teacher model with EMA after successful policy update
+        if did_update:
+            self._update_teacher()
         return metrics

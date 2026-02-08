@@ -130,7 +130,7 @@ class SelfDistillationConfig(BaseConfig):
     distillation_add_tail: bool = True
     is_clip: Optional[float] = 2.0
     max_reprompt_len: int = 10240
-    reprompt_truncation: str = "right"  # "left", "right", "error"
+    reprompt_truncation: str = "right"  # Must be "left" or "right" (for tokenizer.truncation_side)
     success_reward_threshold: float = 0.5
     include_environment_feedback: bool = True
     dont_reprompt_on_self_success: bool = True

@@ -269,6 +269,10 @@ class RayPPOTrainer:
 
         # Store the tokenizer for text processing
         self.tokenizer = tokenizer
+        # SDPO: Set tokenizer padding/truncation behavior for reprompting
+        self.tokenizer.padding_side = "left"
+        # Note: truncation_side must be "left" or "right", default to "right" for SDPO
+        self.tokenizer.truncation_side = config.actor_rollout_ref.actor.get("self_distillation", {}).get("reprompt_truncation", "right")
         self.processor = processor
         self.config = config
         self.reward_fn = reward_fn

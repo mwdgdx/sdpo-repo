@@ -2205,6 +2205,14 @@ def compute_policy_loss_bypass_mode(
 # SDPO: Self-Distillation Loss (from SDPO_original)
 # ============================================================================
 
+
+def _get_cfg(config, key, default=None):
+    """Helper to get config value from either dict or object with attributes."""
+    if isinstance(config, dict):
+        return config.get(key, default)
+    return getattr(config, key, default)
+
+
 def compute_self_distillation_loss(
     student_log_probs: torch.Tensor,
     teacher_log_probs: torch.Tensor,
@@ -2229,14 +2237,17 @@ def compute_self_distillation_loss(
     - Importance sampling clipping
     - Generalized Jensen-Shannon Divergence (when alpha != 0 or 1)
     """
+    # Helper to access config (supports both dict and object)
+    cfg = self_distillation_config
+    
     metrics = {}
 
     loss_mask = response_mask
     if self_distillation_mask is not None:
         loss_mask = loss_mask * self_distillation_mask.unsqueeze(1)
 
-    if self_distillation_config.full_logit_distillation:
-        use_topk = self_distillation_config.distillation_topk is not None
+    if _get_cfg(cfg, "full_logit_distillation", False):
+        use_topk = _get_cfg(cfg, "distillation_topk") is not None
         if use_topk:
             if student_topk_log_probs is None or teacher_topk_log_probs is None:
                 raise ValueError("top-k distillation requires student_topk_log_probs and teacher_topk_log_probs.")
@@ -2255,7 +2266,7 @@ def compute_self_distillation_loss(
 
             student_distill_log_probs = student_topk_log_probs
             teacher_distill_log_probs = teacher_topk_log_probs
-            if self_distillation_config.distillation_add_tail:
+            if _get_cfg(cfg, "distillation_add_tail", False):
                 student_distill_log_probs = add_tail(student_distill_log_probs)
                 teacher_distill_log_probs = add_tail(teacher_distill_log_probs)
             else:
@@ -2267,11 +2278,12 @@ def compute_self_distillation_loss(
             student_distill_log_probs = student_all_log_probs
             teacher_distill_log_probs = teacher_all_log_probs
 
-        if self_distillation_config.alpha == 0.0:
+        alpha_val = _get_cfg(cfg, "alpha", 1.0)
+        if alpha_val == 0.0:
             kl_loss = F.kl_div(
                 student_distill_log_probs, teacher_distill_log_probs, reduction="none", log_target=True
             )
-        elif self_distillation_config.alpha == 1.0:
+        elif alpha_val == 1.0:
             kl_loss = F.kl_div(
                 teacher_distill_log_probs, student_distill_log_probs, reduction="none", log_target=True
             )
@@ -2279,7 +2291,7 @@ def compute_self_distillation_loss(
             # Compute the log of the mixture distribution
             # log(a + b) = log(exp(log(a)) + exp(log(b))) -> for mixture
             alpha = torch.tensor(
-                self_distillation_config.alpha,
+                alpha_val,
                 dtype=student_distill_log_probs.dtype,
                 device=student_distill_log_probs.device,
             )
@@ -2293,11 +2305,11 @@ def compute_self_distillation_loss(
 
         per_token_loss = kl_loss.sum(-1)
     else:
-        assert self_distillation_config.alpha == 1.0, "Only reverse KL is supported for non-full-logit distillation"
+        assert _get_cfg(cfg, "alpha", 1.0) == 1.0, "Only reverse KL is supported for non-full-logit distillation"
         log_ratio = student_log_probs - teacher_log_probs
         per_token_loss = log_ratio.detach() * student_log_probs
 
-    is_clip = self_distillation_config.is_clip
+    is_clip = _get_cfg(cfg, "is_clip")
     if is_clip is not None:
         if old_log_probs is None:
             raise ValueError("old_log_probs is required for distillation IS ratio.")
