@@ -221,6 +221,26 @@ fi
 mkdir -p "$CKPT_DIR"
 
 # ============================================================================
+# Pre-flight Validation (catch errors before wasting time!)
+# ============================================================================
+echo ""
+echo "Running pre-flight validation..."
+echo ""
+
+if [ "$SKIP_VALIDATION" != "true" ]; then
+    python3 "${SCRIPT_DIR}/validate_sdpo.py"
+    VALIDATION_EXIT=$?
+    if [ $VALIDATION_EXIT -ne 0 ]; then
+        echo ""
+        echo "❌ Pre-flight validation failed!"
+        echo "   Fix the issues above before running training."
+        echo "   To skip validation: SKIP_VALIDATION=true bash $0 $@"
+        exit 1
+    fi
+    echo ""
+fi
+
+# ============================================================================
 # Run Training
 # ============================================================================
 echo ""

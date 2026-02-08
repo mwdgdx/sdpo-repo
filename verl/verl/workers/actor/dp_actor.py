@@ -48,18 +48,22 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
 def _has_actual_multi_modal_inputs(non_tensor_batch: dict) -> bool:
-    """Check if multi_modal_inputs exists and contains actual data (not just empty dict/list)."""
+    """Check if multi_modal_inputs exists and contains actual data (not just empty dict/list/array)."""
     if "multi_modal_inputs" not in non_tensor_batch:
         return False
     mm_inputs = non_tensor_batch["multi_modal_inputs"]
     if mm_inputs is None:
         return False
-    if isinstance(mm_inputs, dict):
-        # Check if dict is empty or all values are empty/None
-        if not mm_inputs:
+    # Handle numpy arrays (common in batch processing)
+    if hasattr(mm_inputs, '__len__'):
+        if len(mm_inputs) == 0:
             return False
-        return any(v is not None and (not hasattr(v, '__len__') or len(v) > 0) for v in mm_inputs.values())
-    if isinstance(mm_inputs, (list, tuple)):
+        # For arrays/lists, check if any element has actual content
+        for item in mm_inputs:
+            if item is not None and isinstance(item, dict) and len(item) > 0:
+                return True
+        return False
+    if isinstance(mm_inputs, dict):
         return len(mm_inputs) > 0
     return True  # For other types, assume it has content
 

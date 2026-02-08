@@ -1637,9 +1637,10 @@ class RayPPOTrainer:
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
                     # get images_seqlens (only for VLM models with actual multi-modal inputs)
                     images_seqlens_all = []
-                    if "multi_modal_inputs" in batch.non_tensor_batch and batch.non_tensor_batch["multi_modal_inputs"]:
-                        for multi_modal_input in batch.non_tensor_batch["multi_modal_inputs"]:
-                            if multi_modal_input and "image_grid_thw" in multi_modal_input.keys():
+                    mm_inputs = batch.non_tensor_batch.get("multi_modal_inputs", None)
+                    if mm_inputs is not None and len(mm_inputs) > 0:
+                        for multi_modal_input in mm_inputs:
+                            if multi_modal_input is not None and isinstance(multi_modal_input, dict) and "image_grid_thw" in multi_modal_input:
                                 images_seqlens_all.extend(multi_modal_input["images_seqlens"].tolist())
                     batch.meta_info["images_seqlens"] = images_seqlens_all
                     with marked_timer("reward", timing_raw, color="yellow"):
