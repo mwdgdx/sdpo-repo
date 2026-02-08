@@ -1762,26 +1762,20 @@ class RayPPOTrainer:
                             # IS and off-policy metrics already have rollout_corr/ prefix
                             metrics.update(is_metrics)
 
-                        # SDPO: Check if we should skip advantage computation
-                        loss_mode = self.config.actor_rollout_ref.actor.policy_loss.get("loss_mode", "vanilla")
-                        is_sdpo_mode = loss_mode == "sdpo"
-
                         # compute advantages, executed on the driver process
-                        # SDPO does not use advantages, so skip this computation to save time
-                        if not is_sdpo_mode:
-                            norm_adv_by_std_in_grpo = self.config.algorithm.get(
-                                "norm_adv_by_std_in_grpo", True
-                            )  # GRPO adv normalization factor
+                        norm_adv_by_std_in_grpo = self.config.algorithm.get(
+                            "norm_adv_by_std_in_grpo", True
+                        )  # GRPO adv normalization factor
 
-                            batch = compute_advantage(
-                                batch,
-                                adv_estimator=self.config.algorithm.adv_estimator,
-                                gamma=self.config.algorithm.gamma,
-                                lam=self.config.algorithm.lam,
-                                num_repeat=self.config.actor_rollout_ref.rollout.n,
-                                norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
-                                config=self.config.algorithm,
-                            )
+                        batch = compute_advantage(
+                            batch,
+                            adv_estimator=self.config.algorithm.adv_estimator,
+                            gamma=self.config.algorithm.gamma,
+                            lam=self.config.algorithm.lam,
+                            num_repeat=self.config.actor_rollout_ref.rollout.n,
+                            norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+                            config=self.config.algorithm,
+                        )
 
                         # SDPO: Build self-distillation batch if enabled (loss_mode == 'sdpo')
                         self_distillation_data = self._maybe_build_self_distillation_batch(batch, reward_tensor, reward_extra_infos_dict)
