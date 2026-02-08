@@ -47,6 +47,23 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
+def _has_actual_multi_modal_inputs(non_tensor_batch: dict) -> bool:
+    """Check if multi_modal_inputs exists and contains actual data (not just empty dict/list)."""
+    if "multi_modal_inputs" not in non_tensor_batch:
+        return False
+    mm_inputs = non_tensor_batch["multi_modal_inputs"]
+    if mm_inputs is None:
+        return False
+    if isinstance(mm_inputs, dict):
+        # Check if dict is empty or all values are empty/None
+        if not mm_inputs:
+            return False
+        return any(v is not None and (not hasattr(v, '__len__') or len(v) > 0) for v in mm_inputs.values())
+    if isinstance(mm_inputs, (list, tuple)):
+        return len(mm_inputs) > 0
+    return True  # For other types, assume it has content
+
+
 # =========================================================================
 # SDPO: Trust-Region Teacher (interpolates ref and student logits)
 # =========================================================================
@@ -538,7 +555,7 @@ class DataParallelPPOActor(BasePPOActor):
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid silent error
         use_dynamic_bsz = data.meta_info["use_dynamic_bsz"]
         pad_token_id = data.meta_info.get("pad_token_id", 0)
-        has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
+        has_multi_modal_inputs = _has_actual_multi_modal_inputs(data.non_tensor_batch)
 
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
         non_tensor_select_keys = ["multi_modal_inputs"] if has_multi_modal_inputs else []
@@ -639,7 +656,7 @@ class DataParallelPPOActor(BasePPOActor):
         if "rollout_log_probs" in data.batch.keys():
             select_keys.append("rollout_log_probs")
 
-        has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
+        has_multi_modal_inputs = _has_actual_multi_modal_inputs(data.non_tensor_batch)
         non_tensor_select_keys = []
         if has_multi_modal_inputs:
             non_tensor_select_keys.append("multi_modal_inputs")
