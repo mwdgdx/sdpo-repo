@@ -139,8 +139,9 @@ pip install -q word2number latex2sympy2 "math-verify[antlr4_9_3]==0.8.0"
 pip install -q -e "$SDPO_ORIGIN_DIR"
 pip install -q --upgrade wandb
 
-# Check WandB login
-if ! wandb verify 2>/dev/null; then
+# Check WandB login (use whoami instead of verify)
+WANDB_USER=$(wandb whoami 2>/dev/null | head -1 || echo "")
+if [ -z "$WANDB_USER" ] || echo "$WANDB_USER" | grep -q "not logged in"; then
     log "WandB not logged in. Checking for WANDB_API_KEY..."
     if [ -z "$WANDB_API_KEY" ]; then
         echo ""
@@ -162,8 +163,9 @@ if ! wandb verify 2>/dev/null; then
         # Try to login interactively
         wandb login
     fi
+else
+    log "WandB logged in as: $WANDB_USER"
 fi
-log "WandB ready"
 
 # Create symlink for path compatibility (original config uses /users/$USER/SDPO)
 if [ ! -L "/users/$USER/SDPO" ] && [ ! -d "/users/$USER/SDPO" ]; then
