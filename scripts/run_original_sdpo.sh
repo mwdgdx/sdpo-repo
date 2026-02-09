@@ -229,6 +229,8 @@ unset VLLM_ATTENTION_BACKEND
 export VLLM_USE_V1=1
 export PYTHONBUFFERED=1
 export USER="${USER:-root}"  # Fix for RunPod where USER may not be set
+# Override WANDB_ENTITY - original uses "sample-efficient-rlvr" which we don't have access to
+export WANDB_ENTITY="${WANDB_ENTITY:-}"  # Use your own account (empty = personal account)
 ulimit -c 0
 
 # Experiment name (matching original naming convention)
