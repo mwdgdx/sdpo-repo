@@ -128,6 +128,51 @@ export PYTHONPATH="$SDPO_ORIGIN_DIR:$PYTHONPATH"
 log "PYTHONPATH set"
 
 # =============================================================================
+# DEPENDENCIES & LOGIN (from original run_sdpo.sh setup_cmds)
+# =============================================================================
+
+log "Checking dependencies and logins..."
+
+# Install dependencies (from original run_sdpo.sh line 59-61)
+log "Installing dependencies..."
+pip install -q word2number latex2sympy2 "math-verify[antlr4_9_3]==0.8.0"
+pip install -q -e "$SDPO_ORIGIN_DIR"
+pip install -q --upgrade wandb
+
+# Check WandB login
+if ! wandb verify 2>/dev/null; then
+    log "WandB not logged in. Checking for WANDB_API_KEY..."
+    if [ -z "$WANDB_API_KEY" ]; then
+        echo ""
+        echo "=========================================="
+        echo "WandB login required!"
+        echo "=========================================="
+        echo "Option 1: Set WANDB_API_KEY environment variable"
+        echo "  export WANDB_API_KEY='your_api_key'"
+        echo ""
+        echo "Option 2: Run wandb login"
+        echo "  wandb login"
+        echo ""
+        echo "Option 3: Run in offline mode"
+        echo "  export WANDB_MODE=offline"
+        echo ""
+        echo "Get your API key from: https://wandb.ai/authorize"
+        echo "=========================================="
+        
+        # Try to login interactively
+        wandb login
+    fi
+fi
+log "WandB ready"
+
+# Create symlink for path compatibility (original config uses /users/$USER/SDPO)
+if [ ! -L "/users/$USER/SDPO" ] && [ ! -d "/users/$USER/SDPO" ]; then
+    log "Creating symlink for path compatibility..."
+    sudo mkdir -p "/users/$USER" 2>/dev/null || mkdir -p "/users/$USER"
+    sudo ln -sf "$SDPO_ORIGIN_DIR" "/users/$USER/SDPO" 2>/dev/null || ln -sf "$SDPO_ORIGIN_DIR" "/users/$USER/SDPO"
+fi
+
+# =============================================================================
 # STEP 1: DATA PROCESSING (following original README.md)
 # =============================================================================
 
