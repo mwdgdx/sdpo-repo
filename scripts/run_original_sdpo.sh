@@ -33,7 +33,7 @@ LR="1e-6"
 ALPHA="1.0"
 PPO_MINI_BATCH_SIZE=1
 DISTILLATION_TOPK=20
-EMA_UPDATE_RATE="0.01"
+TEACHER_UPDATE_RATE="0.01"
 LR_WARMUP_STEPS=0
 VAL_ROLLOUT_N=4
 DONT_REPROMPT_ON_SELF_SUCCESS="True"
@@ -209,7 +209,7 @@ run_cmd bash training/verl_training.sh "$EXP_NAME" "$CONFIG_NAME" "$DATA_PATH" \
     "algorithm.rollout_correction.rollout_is=$ROLLOUT_IS" \
     "actor_rollout_ref.actor.self_distillation.dont_reprompt_on_self_success=$DONT_REPROMPT_ON_SELF_SUCCESS" \
     "actor_rollout_ref.actor.self_distillation.alpha=$ALPHA" \
-    "actor_rollout_ref.actor.self_distillation.ema_update_rate=$EMA_UPDATE_RATE" \
+    "actor_rollout_ref.actor.self_distillation.teacher_update_rate=$TEACHER_UPDATE_RATE" \
     "actor_rollout_ref.actor.optim.lr_warmup_steps=$LR_WARMUP_STEPS" \
     "actor_rollout_ref.rollout.val_kwargs.n=$VAL_ROLLOUT_N"
 
