@@ -183,6 +183,7 @@ log "=========================================="
 unset VLLM_ATTENTION_BACKEND
 export VLLM_USE_V1=1
 export PYTHONBUFFERED=1
+export USER="${USER:-root}"  # Fix for RunPod where USER may not be set
 ulimit -c 0
 
 # Experiment name (matching original naming convention)
