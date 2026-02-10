@@ -28,11 +28,22 @@ actor_rollout_ref:
       # Reprompting settings
       max_reprompt_len: 10240
       is_clip: 2.0
-      success_reward_threshold: 1.0
+      success_reward_threshold: 0.5
       include_environment_feedback: true
       dont_reprompt_on_self_success: true
       remove_thinking_from_demonstration: true  # Remove <think>...</think> from demonstrations
       environment_feedback_only_without_solution: true  # Only use feedback when no solution available
+      # ============================================================
+      # Improved SDPO settings (set use_improved_sdpo: true to enable)
+      # ============================================================
+      use_improved_sdpo: false  # Enable improved SDPO algorithm
+      imitation_loss_weight: 0.5  # Weight for imitation KL loss (alpha in paper)
+      # When enabled, the algorithm:
+      # 1. Finds the best response (highest reward) in batch
+      # 2. If best is not perfect, uses teacher+feedback+original_response to revise
+      # 3. Compares revised vs original, picks better one
+      # 4. Loss = imitation_kl (learn best) + sdpo_kl (reduce errors)
+      improved_sdpo_min_reward_threshold: 0.3  # Min reward for best response to be used for imitation
       # Reprompting template - combines prompt, solution section, and feedback section
       reprompt_template: |-
         {prompt}{solution}{feedback}
@@ -51,6 +62,19 @@ actor_rollout_ref:
         The following is feedback from your unsuccessful earlier attempt:
 
         {feedback_raw}
+      # Improved SDPO: Template for teacher revision (includes original response + feedback)
+      revision_template: |-
+        {prompt}
+
+        Your previous attempt:
+
+        {original_response}
+
+        Feedback from your attempt:
+
+        {feedback}
+
+        Based on the feedback above, provide a corrected solution.
     optim:
       # SDPO experiments use lr=1e-6 (10x smaller than typical PPO)
       lr: 1e-6

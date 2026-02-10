@@ -106,8 +106,8 @@ export TRANSFORMERS_CACHE="${HF_HOME}"
 export HF_DATASETS_CACHE="${HF_HOME}/datasets"
 mkdir -p "$HF_HOME"
 
-# Model: Qwen3-4B for full fine-tuning
-export MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3-4B}"
+# Model: Qwen3-8B for full fine-tuning (matching original SDPO)
+export MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3-8B}"
 export TASK="${TASK:-lcb_v6}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-30}"
 export EXPERIMENT_NAME="${EXPERIMENT_NAME:-sdpo_${TASK}}"

@@ -784,7 +784,8 @@ class DataParallelPPOActor(BasePPOActor):
                         teacher_all_logps = teacher_outputs.get("all_logps") if return_all_logps else None
                         teacher_topk_logps = teacher_outputs.get("topk_logps") if distill_topk else None
                         
-                        pg_loss, pg_metrics = compute_self_distillation_loss(
+                        # Compute SDPO distillation loss (reduce errors)
+                        sdpo_loss, pg_metrics = compute_self_distillation_loss(
                             student_log_probs=log_prob,
                             teacher_log_probs=teacher_log_prob,
                             response_mask=response_mask,
@@ -799,6 +800,90 @@ class DataParallelPPOActor(BasePPOActor):
                             rollout_is_weights=rollout_is_weights,
                         )
                         pg_metrics["self_distillation/empty_target_batch"] = self_distillation_mask.sum().item() == 0
+                        
+                        # =========================================================
+                        # Improved SDPO: Add Imitation KL Loss
+                        # =========================================================
+                        use_improved_sdpo = self_distillation_cfg.get("use_improved_sdpo", False)
+                        if use_improved_sdpo and "imitation_teacher_input_ids" in model_inputs:
+                            imitation_loss_weight = self_distillation_cfg.get("imitation_loss_weight", 0.5)
+                            imitation_mask = model_inputs.get("imitation_mask", None)
+                            
+                            # Get imitation target info
+                            imitation_target_responses = model_inputs["imitation_target_response_ids"]
+                            imitation_target_mask = model_inputs["imitation_target_response_mask"]
+                            
+                            # Build imitation teacher input
+                            imitation_teacher_inputs = {
+                                "responses": imitation_target_responses,
+                                "input_ids": model_inputs["imitation_teacher_input_ids"],
+                                "attention_mask": model_inputs["imitation_teacher_attention_mask"],
+                                "position_ids": model_inputs["imitation_teacher_position_ids"],
+                            }
+                            
+                            # Teacher forward for imitation target
+                            with torch.no_grad():
+                                imitation_teacher_outputs = self._forward_micro_batch(
+                                    imitation_teacher_inputs,
+                                    temperature=temperature,
+                                    calculate_entropy=False,
+                                    return_all_logps=return_all_logps,
+                                    distill_topk=distill_topk,
+                                    topk_indices=None,  # Will compute new indices
+                                    module=teacher_model,
+                                )
+                            imitation_teacher_log_probs = imitation_teacher_outputs["log_probs"]
+                            imitation_teacher_all_logps = imitation_teacher_outputs.get("all_logps") if return_all_logps else None
+                            imitation_teacher_topk_logps = imitation_teacher_outputs.get("topk_logps") if distill_topk else None
+                            imitation_teacher_topk_indices = imitation_teacher_outputs.get("topk_indices") if distill_topk else None
+                            
+                            # Student forward for imitation target (with gradient!)
+                            # Use pre-built student inputs (original prompt + imitation target)
+                            imitation_student_inputs = {
+                                "responses": imitation_target_responses,
+                                "input_ids": model_inputs["imitation_student_input_ids"],
+                                "attention_mask": model_inputs["imitation_student_attention_mask"],
+                                "position_ids": model_inputs["imitation_student_position_ids"],
+                            }
+                            # Student sees original prompt + imitation target, computes log_prob for target
+                            imitation_student_outputs = self._forward_micro_batch(
+                                imitation_student_inputs,
+                                temperature=temperature,
+                                calculate_entropy=False,
+                                return_all_logps=return_all_logps,
+                                distill_topk=distill_topk,
+                                topk_indices=imitation_teacher_topk_indices,
+                            )
+                            imitation_student_log_probs = imitation_student_outputs["log_probs"]
+                            imitation_student_all_logps = imitation_student_outputs.get("all_logps") if return_all_logps else None
+                            imitation_student_topk_logps = imitation_student_outputs.get("topk_logps") if distill_topk else None
+                            
+                            # Compute imitation KL loss
+                            imitation_loss, imitation_metrics = compute_self_distillation_loss(
+                                student_log_probs=imitation_student_log_probs,
+                                teacher_log_probs=imitation_teacher_log_probs,
+                                response_mask=imitation_target_mask,
+                                self_distillation_config=self_distillation_cfg,
+                                old_log_probs=None,  # No old log probs for imitation
+                                student_all_log_probs=imitation_student_all_logps,
+                                teacher_all_log_probs=imitation_teacher_all_logps,
+                                student_topk_log_probs=imitation_student_topk_logps,
+                                teacher_topk_log_probs=imitation_teacher_topk_logps,
+                                self_distillation_mask=imitation_mask,
+                                loss_agg_mode=loss_agg_mode,
+                                rollout_is_weights=None,  # No IS weights for imitation
+                            )
+                            
+                            # Combine losses: imitation_weight * imitation_loss + (1 - imitation_weight) * sdpo_loss
+                            pg_loss = imitation_loss_weight * imitation_loss + (1 - imitation_loss_weight) * sdpo_loss
+                            
+                            # Add imitation metrics
+                            pg_metrics["improved_sdpo/imitation_loss"] = imitation_loss.detach().item()
+                            pg_metrics["improved_sdpo/sdpo_loss"] = sdpo_loss.detach().item()
+                            pg_metrics["improved_sdpo/combined_loss"] = pg_loss.detach().item()
+                        else:
+                            pg_loss = sdpo_loss
+                        
                         micro_batch_metrics.update(pg_metrics)
                     else:
                         # gpg -> verl.trainer.ppo.core_algos.compute_policy_loss_gpg

@@ -151,6 +151,18 @@ class SelfDistillationConfig(BaseConfig):
         "The following is feedback from your unsuccessful earlier attempt:\n\n"
         "{feedback_raw}\n\n"
     )
+    # Improved SDPO settings
+    use_improved_sdpo: bool = False  # Enable improved SDPO algorithm
+    imitation_loss_weight: float = 0.5  # Weight for imitation KL loss
+    improved_sdpo_min_reward_threshold: float = 0.3  # Min reward for best response to be used
+    revision_template: str = (
+        "{prompt}\n\n"
+        "Your previous attempt:\n\n"
+        "{original_response}\n\n"
+        "Feedback from your attempt:\n\n"
+        "{feedback}\n\n"
+        "Based on the feedback above, provide a corrected solution.\n"
+    )
     
     def __post_init__(self):
         """Validate self-distillation configuration."""

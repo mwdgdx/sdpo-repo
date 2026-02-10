@@ -25,7 +25,7 @@ import uuid
 from collections import defaultdict
 from copy import deepcopy
 from pprint import pprint
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import ray
@@ -726,6 +726,483 @@ class RayPPOTrainer:
             "teacher_position_ids": teacher_position_ids,
             "self_distillation_mask": self_distillation_mask,
         }), metrics
+
+    def _build_improved_sdpo_batch(
+        self,
+        batch: DataProto,
+        reward_tensor: torch.Tensor,
+        reward_extra_infos_dict: Optional[dict[str, list]] = None,
+    ) -> Optional[tuple[DataProto, dict[str, float]]]:
+        """
+        Build batch for Improved SDPO algorithm (without teacher rollout).
+        
+        This method prepares the revision prompts. The actual teacher rollout
+        is done in _do_teacher_rollout_for_improved_sdpo().
+        
+        Returns (batch_with_revision_info, metrics) or None if not enabled.
+        """
+        self_distillation_cfg = self.config.actor_rollout_ref.actor.get("self_distillation", None)
+        loss_mode = self.config.actor_rollout_ref.actor.policy_loss.get("loss_mode", "vanilla")
+        
+        if self_distillation_cfg is None or loss_mode != "sdpo":
+            return None
+        
+        if not self_distillation_cfg.get("use_improved_sdpo", False):
+            return None
+        
+        device = batch.batch["input_ids"].device
+        response_mask = batch.batch["response_mask"]
+        responses = batch.batch["responses"]
+        response_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in responses]
+        prompt_texts = [msgs[-1]["content"] for msgs in batch.non_tensor_batch["raw_prompt"]]
+        batch_size = batch.batch.batch_size[0]
+        uids = batch.non_tensor_batch["uid"]
+        
+        # Get per-sample rewards
+        seq_scores = reward_tensor.sum(dim=-1).detach().cpu().numpy()
+        
+        # Extract feedback
+        feedback_list = self._collect_feedback(
+            include_environment_feedback=self_distillation_cfg.include_environment_feedback,
+            reward_extra_infos_dict=reward_extra_infos_dict,
+            batch_size=batch_size,
+        )
+        
+        # ============================================================
+        # Step 1: Find best response for each uid (prompt group)
+        # ============================================================
+        best_by_uid: dict[Any, tuple[int, float]] = {}  # uid -> (best_idx, best_reward)
+        for idx, uid in enumerate(uids):
+            reward = seq_scores[idx]
+            if uid not in best_by_uid or reward > best_by_uid[uid][1]:
+                best_by_uid[uid] = (idx, reward)
+        
+        # Store info for later use in teacher rollout
+        batch.meta_info["improved_sdpo_best_by_uid"] = best_by_uid
+        batch.meta_info["improved_sdpo_feedback_list"] = feedback_list
+        batch.meta_info["improved_sdpo_response_texts"] = response_texts
+        batch.meta_info["improved_sdpo_seq_scores"] = seq_scores
+        # Store original prompt info (before any batch.union() calls)
+        prompt_len = batch.batch["input_ids"].shape[1] - responses.shape[1]
+        batch.meta_info["improved_sdpo_original_prompt_ids"] = batch.batch["input_ids"][:, :prompt_len].clone()
+        batch.meta_info["improved_sdpo_original_prompt_mask"] = batch.batch["attention_mask"][:, :prompt_len].clone()
+        
+        # ============================================================
+        # Step 2: Build original SDPO distillation batch
+        # ============================================================
+        # This is for the "reduce errors" part of the loss
+        success_by_uid = self._collect_solutions_by_uid(
+            batch, reward_tensor, 
+            success_reward_threshold=self_distillation_cfg.success_reward_threshold
+        )
+        solution_strs = [
+            self._get_solution(
+                i, success_by_uid, uids, response_texts,
+                self_distillation_cfg.dont_reprompt_on_self_success,
+                self_distillation_cfg.get("remove_thinking_from_demonstration", False),
+            )
+            for i in range(batch_size)
+        ]
+        
+        def _build_sdpo_teacher_message(i: int) -> list[dict]:
+            system_messages = batch.non_tensor_batch["raw_prompt"][i][:-1]
+            has_solution = solution_strs[i] is not None
+            has_feedback = feedback_list[i] is not None
+            feedback_only_without_solution = self_distillation_cfg.get("environment_feedback_only_without_solution", False)
+            use_feedback = has_feedback and (not feedback_only_without_solution or not has_solution)
+
+            solution_section = ""
+            if has_solution:
+                solution_section = self_distillation_cfg.solution_template.format(
+                    successful_previous_attempt=solution_strs[i]
+                )
+
+            feedback_section = ""
+            if use_feedback:
+                feedback_section = self_distillation_cfg.feedback_template.format(
+                    feedback_raw=feedback_list[i]
+                )
+
+            if use_feedback or has_solution:
+                reprompt_text = self_distillation_cfg.reprompt_template.format(
+                    prompt=prompt_texts[i],
+                    solution=solution_section,
+                    feedback=feedback_section,
+                )
+            else:
+                reprompt_text = prompt_texts[i]
+
+            return system_messages + [{"role": "user", "content": reprompt_text}]
+        
+        enable_thinking = self.config.data.apply_chat_template_kwargs.get("enable_thinking", True) if self.config.data.apply_chat_template_kwargs else True
+        
+        sdpo_messages = [_build_sdpo_teacher_message(i) for i in range(batch_size)]
+        sdpo_teacher_prompt = self.tokenizer.apply_chat_template(
+            sdpo_messages, tokenize=True, return_tensors="pt", return_dict=True,
+            continue_final_message=False, add_generation_prompt=True,
+            enable_thinking=enable_thinking,
+            max_length=self_distillation_cfg.max_reprompt_len,
+            padding=True, truncation=True,
+        )
+        
+        sdpo_teacher_input_ids = torch.cat([sdpo_teacher_prompt["input_ids"].to(device), responses], dim=1)
+        sdpo_teacher_attention_mask = torch.cat([sdpo_teacher_prompt["attention_mask"].to(device), response_mask], dim=1)
+        sdpo_teacher_position_ids = compute_position_id_with_mask(sdpo_teacher_attention_mask)
+        
+        feedback_only_without_solution = self_distillation_cfg.get("environment_feedback_only_without_solution", False)
+        feedback_used = [
+            feedback_list[i] is not None and (not feedback_only_without_solution or solution_strs[i] is None)
+            for i in range(batch_size)
+        ]
+        sdpo_mask = torch.tensor(
+            [solution_strs[i] is not None or feedback_used[i] for i in range(batch_size)],
+            dtype=torch.float32, device=device
+        )
+        
+        # ============================================================
+        # Metrics
+        # ============================================================
+        unique_uids = set(uids)
+        min_reward_threshold = self_distillation_cfg.get("improved_sdpo_min_reward_threshold", 0.3)
+        num_needs_revision = sum(
+            1 for uid in unique_uids 
+            if min_reward_threshold <= best_by_uid[uid][1] < 1.0
+        )
+        avg_best_reward = np.mean([best_by_uid[uid][1] for uid in unique_uids])
+        
+        metrics = {
+            "improved_sdpo/num_groups_need_revision": num_needs_revision,
+            "improved_sdpo/avg_best_reward_before_revision": avg_best_reward,
+            "improved_sdpo/sdpo_mask_fraction": sdpo_mask.float().mean().item(),
+            "self_distillation/success_group_fraction": len([uid for uid in unique_uids if len(success_by_uid[uid]) > 0]) / len(unique_uids),
+            "self_distillation/success_sample_fraction": sum(1 for s in solution_strs if s is not None) / batch_size,
+        }
+        
+        return DataProto.from_dict(tensors={
+            # SDPO KL targets (reduce errors in current response)
+            "teacher_input_ids": sdpo_teacher_input_ids,
+            "teacher_attention_mask": sdpo_teacher_attention_mask,
+            "teacher_position_ids": sdpo_teacher_position_ids,
+            "self_distillation_mask": sdpo_mask,
+        }), metrics
+
+    def _do_teacher_rollout_for_improved_sdpo(
+        self,
+        batch: DataProto,
+        reward_fn: Callable,
+    ) -> tuple[DataProto, dict[str, float]]:
+        """
+        Perform teacher rollout for improved SDPO.
+        
+        For each prompt group where best reward < 1.0:
+        1. Build revision prompt (prompt + best_response + feedback)
+        2. Teacher generates new response
+        3. Compute reward for new response
+        4. If new response is better, use it as imitation target
+        
+        Returns updated batch with imitation targets and metrics.
+        """
+        self_distillation_cfg = self.config.actor_rollout_ref.actor.get("self_distillation", None)
+        
+        device = batch.batch["input_ids"].device
+        response_mask = batch.batch["response_mask"]
+        responses = batch.batch["responses"]
+        batch_size = batch.batch.batch_size[0]
+        uids = batch.non_tensor_batch["uid"]
+        prompt_texts = [msgs[-1]["content"] for msgs in batch.non_tensor_batch["raw_prompt"]]
+        
+        # Retrieve stored info from _build_improved_sdpo_batch
+        best_by_uid = batch.meta_info["improved_sdpo_best_by_uid"]
+        feedback_list = batch.meta_info["improved_sdpo_feedback_list"]
+        response_texts = batch.meta_info["improved_sdpo_response_texts"]
+        # original_seq_scores available in batch.meta_info["improved_sdpo_seq_scores"] if needed
+        
+        min_reward_threshold = self_distillation_cfg.get("improved_sdpo_min_reward_threshold", 0.3)
+        revision_template = self_distillation_cfg.get("revision_template", 
+            "{prompt}\n\nYour previous attempt:\n{original_response}\n\nFeedback:\n{feedback}\n\nProvide a corrected solution.")
+        enable_thinking = self.config.data.apply_chat_template_kwargs.get("enable_thinking", True) if self.config.data.apply_chat_template_kwargs else True
+        
+        # ============================================================
+        # Step 1: Identify unique prompts that need teacher revision
+        # ============================================================
+        unique_uids = list(dict.fromkeys(uids))  # Preserve order, remove duplicates
+        uid_to_first_idx = {uid: i for i, uid in enumerate(uids)}  # First occurrence of each uid
+        
+        revision_uids = []  # UIDs that need revision
+        revision_prompts_raw = []  # Raw prompt messages for revision
+        
+        for uid in unique_uids:
+            best_idx, best_reward = best_by_uid[uid]
+            first_idx = uid_to_first_idx[uid]
+            
+            if min_reward_threshold <= best_reward < 1.0:
+                # Need revision
+                revision_uids.append(uid)
+                
+                best_response_text = response_texts[best_idx]
+                feedback_for_best = feedback_list[best_idx] if feedback_list[best_idx] else "No specific feedback available."
+                
+                if self_distillation_cfg.get("remove_thinking_from_demonstration", False):
+                    best_response_text = self._remove_thinking_trace(best_response_text)
+                
+                revision_content = revision_template.format(
+                    prompt=prompt_texts[first_idx],
+                    original_response=best_response_text,
+                    feedback=feedback_for_best,
+                )
+                
+                system_messages = batch.non_tensor_batch["raw_prompt"][first_idx][:-1]
+                revision_prompts_raw.append(system_messages + [{"role": "user", "content": revision_content}])
+        
+        # ============================================================
+        # Step 2: Teacher rollout (if any prompts need revision)
+        # ============================================================
+        revised_by_uid: dict[Any, tuple[str, float]] = {}  # uid -> (revised_response, revised_reward)
+        metrics = {}
+        
+        if len(revision_uids) > 0:
+            # Tokenize revision prompts
+            revision_tokens = self.tokenizer.apply_chat_template(
+                revision_prompts_raw, tokenize=True, return_tensors="pt", return_dict=True,
+                continue_final_message=False, add_generation_prompt=True,
+                enable_thinking=enable_thinking,
+                max_length=self_distillation_cfg.max_reprompt_len,
+                padding=True, truncation=True,
+            )
+            
+            # Build DataProto for generation
+            revision_gen_batch = DataProto.from_dict(tensors={
+                "input_ids": revision_tokens["input_ids"],
+                "attention_mask": revision_tokens["attention_mask"],
+                "position_ids": compute_position_id_with_mask(revision_tokens["attention_mask"]),
+            })
+            revision_gen_batch.meta_info = {
+                "eos_token_id": self.tokenizer.eos_token_id,
+                "pad_token_id": self.tokenizer.pad_token_id,
+                "recompute_log_prob": False,
+                "temperature": self.config.actor_rollout_ref.rollout.temperature,
+                "do_sample": True,
+            }
+            
+            # Copy non_tensor_batch info for reward computation
+            # We need to map each revision back to its original prompt info
+            revision_non_tensor = {}
+            for key in ["raw_prompt", "data_source", "reward_model", "extra_info"]:
+                if key in batch.non_tensor_batch:
+                    revision_non_tensor[key] = [
+                        batch.non_tensor_batch[key][uid_to_first_idx[uid]] 
+                        for uid in revision_uids
+                    ]
+            revision_gen_batch.non_tensor_batch = revision_non_tensor
+            revision_gen_batch.non_tensor_batch["uid"] = np.array(revision_uids, dtype=object)
+            
+            # Pad to divisor if needed
+            size_divisor = (
+                self.config.actor_rollout_ref.rollout.actor.tensor_parallel_size
+                if not self.async_rollout_mode
+                else self.config.actor_rollout_ref.rollout.agent.num_workers
+            )
+            revision_gen_batch_padded, pad_size = pad_dataproto_to_divisor(revision_gen_batch, size_divisor)
+            
+            # Generate with teacher (using rollout worker)
+            if not self.async_rollout_mode:
+                revision_output_padded = self.actor_rollout_wg.generate_sequences(revision_gen_batch_padded)
+            else:
+                revision_output_padded = self.async_rollout_manager.generate_sequences(revision_gen_batch_padded)
+            
+            # Unpad
+            revision_output = unpad_dataproto(revision_output_padded, pad_size=pad_size)
+            
+            # ============================================================
+            # Step 3: Compute rewards for revised responses
+            # ============================================================
+            revised_responses = revision_output.batch["responses"]
+            revised_response_texts = [
+                self.tokenizer.decode(ids, skip_special_tokens=True) 
+                for ids in revised_responses
+            ]
+            
+            # Compute rewards
+            revised_reward_tensor, revised_extra_info = compute_reward(revision_output, reward_fn)
+            revised_seq_scores = revised_reward_tensor.sum(dim=-1).detach().cpu().numpy()
+            
+            # Store results
+            for i, uid in enumerate(revision_uids):
+                revised_by_uid[uid] = (revised_response_texts[i], float(revised_seq_scores[i]))
+            
+            metrics["improved_sdpo/num_revisions_done"] = len(revision_uids)
+            metrics["improved_sdpo/avg_revised_reward"] = float(np.mean(revised_seq_scores))
+        else:
+            metrics["improved_sdpo/num_revisions_done"] = 0
+            metrics["improved_sdpo/avg_revised_reward"] = 0.0
+        
+        # ============================================================
+        # Step 4: Build imitation targets (original best or revised)
+        # ============================================================
+        imitation_target_idx = []  # Index of response to imitate (in original batch)
+        imitation_target_is_revised = []  # Whether target is from revision
+        imitation_mask = []  # Whether this sample participates in imitation
+        
+        # Store revised responses to add to batch later
+        revised_response_tensors = {}  # uid -> response tensor
+        
+        for i in range(batch_size):
+            uid = uids[i]
+            best_idx, best_reward = best_by_uid[uid]
+            
+            if best_reward < min_reward_threshold:
+                # Best response too bad, skip imitation
+                imitation_target_idx.append(i)
+                imitation_target_is_revised.append(False)
+                imitation_mask.append(False)
+            elif uid in revised_by_uid:
+                # Check if revised is better
+                revised_text, revised_reward = revised_by_uid[uid]
+                if revised_reward > best_reward:
+                    # Use revised
+                    imitation_target_idx.append(-1)  # Special marker for revised
+                    imitation_target_is_revised.append(True)
+                    imitation_mask.append(True)
+                    
+                    # Tokenize revised response if not already
+                    if uid not in revised_response_tensors:
+                        revised_tokens = self.tokenizer.encode(
+                            revised_text, 
+                            return_tensors="pt",
+                            add_special_tokens=False,
+                            truncation=True,
+                            max_length=responses.shape[1],
+                        )
+                        # Pad to match response length
+                        if revised_tokens.shape[1] < responses.shape[1]:
+                            pad_len = responses.shape[1] - revised_tokens.shape[1]
+                            revised_tokens = torch.cat([
+                                revised_tokens,
+                                torch.full((1, pad_len), self.tokenizer.pad_token_id, dtype=torch.long)
+                            ], dim=1)
+                        elif revised_tokens.shape[1] > responses.shape[1]:
+                            # Truncate if longer (shouldn't happen due to max_length, but just in case)
+                            revised_tokens = revised_tokens[:, :responses.shape[1]]
+                        revised_response_tensors[uid] = revised_tokens[0].to(device)
+                else:
+                    # Original is better
+                    imitation_target_idx.append(best_idx)
+                    imitation_target_is_revised.append(False)
+                    imitation_mask.append(True)
+            else:
+                # No revision needed or done, use original best
+                imitation_target_idx.append(best_idx)
+                imitation_target_is_revised.append(False)
+                imitation_mask.append(True)
+        
+        # ============================================================
+        # Step 5: Build imitation tensors
+        # ============================================================
+        imitation_target_responses = []
+        imitation_target_masks_list = []
+        
+        for i in range(batch_size):
+            uid = uids[i]
+            if imitation_target_is_revised[i] and uid in revised_response_tensors:
+                resp = revised_response_tensors[uid]
+                mask = (resp != self.tokenizer.pad_token_id).float()
+            else:
+                idx = imitation_target_idx[i]
+                resp = responses[idx]
+                mask = response_mask[idx]
+            imitation_target_responses.append(resp)
+            imitation_target_masks_list.append(mask)
+        
+        imitation_target_responses = torch.stack(imitation_target_responses)
+        imitation_target_masks = torch.stack(imitation_target_masks_list)
+        imitation_mask_tensor = torch.tensor(imitation_mask, dtype=torch.float32, device=device)
+        
+        # Build teacher prompt for imitation (teacher sees solution context)
+        def _build_imitation_teacher_message(i: int) -> list[dict]:
+            system_messages = batch.non_tensor_batch["raw_prompt"][i][:-1]
+            uid = uids[i]
+            
+            # Get the actual target response text
+            if imitation_target_is_revised[i] and uid in revised_by_uid:
+                target_text = revised_by_uid[uid][0]
+            else:
+                target_text = response_texts[imitation_target_idx[i]]
+            
+            if self_distillation_cfg.get("remove_thinking_from_demonstration", False):
+                target_text = self._remove_thinking_trace(target_text)
+            
+            solution_section = self_distillation_cfg.solution_template.format(
+                successful_previous_attempt=target_text
+            )
+            content = self_distillation_cfg.reprompt_template.format(
+                prompt=prompt_texts[i],
+                solution=solution_section,
+                feedback="",
+            )
+            
+            return system_messages + [{"role": "user", "content": content}]
+        
+        imitation_messages = [_build_imitation_teacher_message(i) for i in range(batch_size)]
+        imitation_teacher_prompt = self.tokenizer.apply_chat_template(
+            imitation_messages, tokenize=True, return_tensors="pt", return_dict=True,
+            continue_final_message=False, add_generation_prompt=True,
+            enable_thinking=enable_thinking,
+            max_length=self_distillation_cfg.max_reprompt_len,
+            padding=True, truncation=True,
+        )
+        
+        imitation_teacher_input_ids = torch.cat([
+            imitation_teacher_prompt["input_ids"].to(device), 
+            imitation_target_responses
+        ], dim=1)
+        imitation_teacher_attention_mask = torch.cat([
+            imitation_teacher_prompt["attention_mask"].to(device), 
+            imitation_target_masks
+        ], dim=1)
+        imitation_teacher_position_ids = compute_position_id_with_mask(imitation_teacher_attention_mask)
+        
+        # Build student input for imitation (original prompt + imitation target)
+        # This is needed because student needs to see prompt + target to compute log_prob
+        # Use stored original prompt info to avoid issues after batch.union()
+        original_prompt_ids = batch.meta_info["improved_sdpo_original_prompt_ids"]
+        original_prompt_mask = batch.meta_info["improved_sdpo_original_prompt_mask"]
+        
+        imitation_student_input_ids = torch.cat([original_prompt_ids, imitation_target_responses], dim=1)
+        imitation_student_attention_mask = torch.cat([original_prompt_mask, imitation_target_masks], dim=1)
+        imitation_student_position_ids = compute_position_id_with_mask(imitation_student_attention_mask)
+        
+        # ============================================================
+        # Metrics
+        # ============================================================
+        num_revised_used = sum(imitation_target_is_revised)
+        num_with_imitation = sum(imitation_mask)
+        
+        # Calculate improvement
+        improvements = []
+        for uid in revision_uids:
+            if uid in revised_by_uid:
+                original_reward = best_by_uid[uid][1]
+                revised_reward = revised_by_uid[uid][1]
+                improvements.append(revised_reward - original_reward)
+        
+        metrics["improved_sdpo/num_revised_better"] = num_revised_used
+        metrics["improved_sdpo/imitation_sample_fraction"] = num_with_imitation / batch_size
+        metrics["improved_sdpo/avg_improvement_from_revision"] = float(np.mean(improvements)) if improvements else 0.0
+        
+        # Add imitation tensors to batch
+        imitation_batch = DataProto.from_dict(tensors={
+            "imitation_teacher_input_ids": imitation_teacher_input_ids,
+            "imitation_teacher_attention_mask": imitation_teacher_attention_mask,
+            "imitation_teacher_position_ids": imitation_teacher_position_ids,
+            "imitation_student_input_ids": imitation_student_input_ids,
+            "imitation_student_attention_mask": imitation_student_attention_mask,
+            "imitation_student_position_ids": imitation_student_position_ids,
+            "imitation_target_response_ids": imitation_target_responses,
+            "imitation_target_response_mask": imitation_target_masks,
+            "imitation_mask": imitation_mask_tensor,
+        })
+        
+        return imitation_batch, metrics
 
     # =========================================================================
     # End of SDPO Methods
@@ -1778,11 +2255,28 @@ class RayPPOTrainer:
                         )
 
                         # SDPO: Build self-distillation batch if enabled (loss_mode == 'sdpo')
-                        self_distillation_data = self._maybe_build_self_distillation_batch(batch, reward_tensor, reward_extra_infos_dict)
-                        if self_distillation_data is not None:
-                            self_distillation_batch, self_distillation_metrics = self_distillation_data
-                            batch = batch.union(self_distillation_batch)
-                            metrics.update(self_distillation_metrics)
+                        # First try improved SDPO, fall back to original SDPO
+                        improved_sdpo_data = self._build_improved_sdpo_batch(batch, reward_tensor, reward_extra_infos_dict)
+                        if improved_sdpo_data is not None:
+                            # Improved SDPO is enabled - first add SDPO KL batch
+                            improved_sdpo_batch, improved_sdpo_metrics = improved_sdpo_data
+                            batch = batch.union(improved_sdpo_batch)
+                            metrics.update(improved_sdpo_metrics)
+                            
+                            # Then do teacher rollout for imitation targets
+                            with marked_timer("teacher_rollout", timing_raw, color="cyan"):
+                                imitation_batch, imitation_metrics = self._do_teacher_rollout_for_improved_sdpo(
+                                    batch, self.reward_fn
+                                )
+                                batch = batch.union(imitation_batch)
+                                metrics.update(imitation_metrics)
+                        else:
+                            # Fall back to original SDPO
+                            self_distillation_data = self._maybe_build_self_distillation_batch(batch, reward_tensor, reward_extra_infos_dict)
+                            if self_distillation_data is not None:
+                                self_distillation_batch, self_distillation_metrics = self_distillation_data
+                                batch = batch.union(self_distillation_batch)
+                                metrics.update(self_distillation_metrics)
 
                     # update critic
                     if self.use_critic:
