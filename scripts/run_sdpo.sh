@@ -15,7 +15,7 @@
 #   TRAIN_BATCH_SIZE    - Training batch size (default: 32)
 #
 #   Improved SDPO (experimental):
-#   USE_IMPROVED_SDPO       - Enable improved SDPO algorithm (default: false)
+#   USE_IMPROVED_SDPO       - Enable improved SDPO algorithm (default: true)
 #   IMITATION_LOSS_WEIGHT   - Weight for imitation KL loss (default: 0.5)
 #   IMPROVED_SDPO_MIN_REWARD - Min reward threshold for imitation (default: 0.3)
 #
@@ -127,7 +127,7 @@ export MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-2}"
 export LEARNING_RATE="${LEARNING_RATE:-1e-6}"  # SDPO uses 1e-6, not 1e-5!
 
 # Improved SDPO settings (experimental)
-export USE_IMPROVED_SDPO="${USE_IMPROVED_SDPO:-false}"
+export USE_IMPROVED_SDPO="${USE_IMPROVED_SDPO:-true}"
 export IMITATION_LOSS_WEIGHT="${IMITATION_LOSS_WEIGHT:-0.5}"
 export IMPROVED_SDPO_MIN_REWARD="${IMPROVED_SDPO_MIN_REWARD:-0.3}"
 
