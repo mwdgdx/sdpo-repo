@@ -97,3 +97,6 @@ data:
 
 trainer:
   val_before_train: False
+  # Resume mode: "auto" (resume if checkpoint exists), "disable" (start fresh), "resume_path" (from specific path)
+  # Use RESUME_MODE env var to override, default is "disable" for fresh starts
+  resume_mode: ${oc.decode:${oc.env:RESUME_MODE,disable}}
