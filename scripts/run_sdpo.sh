@@ -11,8 +11,13 @@
 #   EXPERIMENT_NAME     - Experiment name for logging (default: sdpo_$TASK)
 #   SAVE_FREQ           - Checkpoint save frequency in iterations (default: 10)
 #   TEST_FREQ           - Validation frequency in iterations (default: 5)
-#   LEARNING_RATE       - Learning rate (default: 1e-5)
+#   LEARNING_RATE       - Learning rate (default: 1e-6)
 #   TRAIN_BATCH_SIZE    - Training batch size (default: 32)
+#
+#   Improved SDPO (experimental):
+#   USE_IMPROVED_SDPO       - Enable improved SDPO algorithm (default: false)
+#   IMITATION_LOSS_WEIGHT   - Weight for imitation KL loss (default: 0.5)
+#   IMPROVED_SDPO_MIN_REWARD - Min reward threshold for imitation (default: 0.3)
 #
 #   WandB (Logging):
 #   WANDB_API_KEY       - WandB API key for metrics tracking
@@ -121,6 +126,11 @@ export MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-2}"
 # Training settings (matching SDPO experiments/rich_feedback/run_sdpo.sh)
 export LEARNING_RATE="${LEARNING_RATE:-1e-6}"  # SDPO uses 1e-6, not 1e-5!
 
+# Improved SDPO settings (experimental)
+export USE_IMPROVED_SDPO="${USE_IMPROVED_SDPO:-false}"
+export IMITATION_LOSS_WEIGHT="${IMITATION_LOSS_WEIGHT:-0.5}"
+export IMPROVED_SDPO_MIN_REWARD="${IMPROVED_SDPO_MIN_REWARD:-0.3}"
+
 # WandB configuration
 export WANDB_PROJECT="${WANDB_PROJECT:-$PROJECT_NAME}"
 
@@ -173,6 +183,13 @@ echo ""
 echo "Logging:"
 echo "  WANDB_PROJECT:     $WANDB_PROJECT"
 echo "  WANDB_API_KEY:     ${WANDB_API_KEY:+[SET]}${WANDB_API_KEY:-[NOT SET]}"
+echo ""
+echo "Improved SDPO (experimental):"
+echo "  USE_IMPROVED_SDPO:       $USE_IMPROVED_SDPO"
+if [ "$USE_IMPROVED_SDPO" = "true" ]; then
+    echo "  IMITATION_LOSS_WEIGHT:   $IMITATION_LOSS_WEIGHT"
+    echo "  IMPROVED_SDPO_MIN_REWARD: $IMPROVED_SDPO_MIN_REWARD"
+fi
 echo ""
 echo "Post-training:"
 echo "  UPLOAD_CHECKPOINT: $UPLOAD_CHECKPOINT"
@@ -262,6 +279,18 @@ EXTRA_ARGS="$EXTRA_ARGS data.train_batch_size=$TRAIN_BATCH_SIZE"
 # NOTE: ppo_mini_batch_size=1 is set in sdpo.yaml for on-policy training
 # Do NOT override it here (SDPO experiments use 1, not $TRAIN_BATCH_SIZE)
 EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.optim.lr=$LEARNING_RATE"
+
+# Improved SDPO overrides (experimental)
+if [ "$USE_IMPROVED_SDPO" = "true" ]; then
+    echo ""
+    echo "🧪 Improved SDPO enabled!"
+    echo "   - Teacher will re-rollout with feedback for best responses"
+    echo "   - Loss = imitation_kl + sdpo_kl"
+    echo ""
+    EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.self_distillation.use_improved_sdpo=true"
+    EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.self_distillation.imitation_loss_weight=$IMITATION_LOSS_WEIGHT"
+    EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.self_distillation.improved_sdpo_min_reward_threshold=$IMPROVED_SDPO_MIN_REWARD"
+fi
 
 TRAINING_SUCCESS=false
 python3 -m verl.trainer.main_ppo \
