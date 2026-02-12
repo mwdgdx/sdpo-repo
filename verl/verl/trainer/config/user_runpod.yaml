@@ -44,6 +44,9 @@ actor_rollout_ref:
     max_model_len: ${max_model_len}
     # Set ENFORCE_EAGER=true to skip CUDA graph compilation (faster startup, slower inference)
     enforce_eager: ${oc.decode:${oc.env:ENFORCE_EAGER,false}}
+    # Qwen3-8B embedding is ~2.3GB, default 2048 MB is too small
+    checkpoint_engine:
+      update_weights_bucket_megabytes: 4096
     val_kwargs:
       top_p: 0.95
       temperature: 0.6
