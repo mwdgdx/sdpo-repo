@@ -944,6 +944,14 @@ class RayPPOTrainer:
         revision_uids = []  # UIDs that need revision
         revision_prompts_raw = []  # Raw prompt messages for revision
         
+        # Simplified template when original_response makes prompt too long
+        simplified_revision_template = self_distillation_cfg.get("simplified_revision_template",
+            "{prompt}\n\nFeedback from a previous attempt:\n{feedback}\n\nBased on the feedback above, provide a correct solution.")
+        
+        max_model_len = self.config.actor_rollout_ref.rollout.max_model_len
+        min_response_len = 512  # Minimum space for response generation
+        max_safe_prompt_len = max_model_len - min_response_len
+        
         for uid in unique_uids:
             best_idx, best_reward = best_by_uid[uid]
             first_idx = uid_to_first_idx[uid]
@@ -951,15 +959,13 @@ class RayPPOTrainer:
             # Try revision for ALL non-perfect responses (reward < 1.0)
             # Even if best_reward is low, revision might improve it significantly
             if best_reward < 1.0:
-                # Need revision
-                revision_uids.append(uid)
-                
                 best_response_text = response_texts[best_idx]
                 feedback_for_best = feedback_list[best_idx] if feedback_list[best_idx] else "No specific feedback available."
                 
                 if self_distillation_cfg.get("remove_thinking_from_demonstration", False):
                     best_response_text = self._remove_thinking_trace(best_response_text)
                 
+                # Try full revision prompt first (with original_response)
                 revision_content = revision_template.format(
                     prompt=prompt_texts[first_idx],
                     original_response=best_response_text,
@@ -967,7 +973,41 @@ class RayPPOTrainer:
                 )
                 
                 system_messages = batch.non_tensor_batch["raw_prompt"][first_idx][:-1]
-                revision_prompts_raw.append(system_messages + [{"role": "user", "content": revision_content}])
+                full_messages = system_messages + [{"role": "user", "content": revision_content}]
+                
+                # Quick length check (approximate)
+                full_tokens = self.tokenizer.apply_chat_template(
+                    [full_messages], tokenize=True, return_tensors="pt",
+                    add_generation_prompt=True, enable_thinking=enable_thinking,
+                )
+                full_len = full_tokens.shape[1]
+                
+                if full_len <= max_safe_prompt_len:
+                    # Full prompt fits, use it
+                    revision_uids.append(uid)
+                    revision_prompts_raw.append(full_messages)
+                else:
+                    # Full prompt too long, try simplified (without original_response)
+                    simplified_content = simplified_revision_template.format(
+                        prompt=prompt_texts[first_idx],
+                        feedback=feedback_for_best,
+                    )
+                    simplified_messages = system_messages + [{"role": "user", "content": simplified_content}]
+                    
+                    simplified_tokens = self.tokenizer.apply_chat_template(
+                        [simplified_messages], tokenize=True, return_tensors="pt",
+                        add_generation_prompt=True, enable_thinking=enable_thinking,
+                    )
+                    simplified_len = simplified_tokens.shape[1]
+                    
+                    if simplified_len <= max_safe_prompt_len:
+                        # Simplified prompt fits
+                        revision_uids.append(uid)
+                        revision_prompts_raw.append(simplified_messages)
+                        logger.info(f"Using simplified revision prompt for uid {uid} (saved {full_len - simplified_len} tokens)")
+                    else:
+                        # Even simplified is too long, skip
+                        logger.warning(f"Skipping revision for uid {uid}: even simplified prompt is too long ({simplified_len} > {max_safe_prompt_len})")
         
         # ============================================================
         # Step 2: Teacher rollout (if any prompts need revision)
@@ -976,38 +1016,14 @@ class RayPPOTrainer:
         metrics = {}
         
         if len(revision_uids) > 0:
-            # Tokenize revision prompts
-            max_model_len = self.config.actor_rollout_ref.rollout.max_model_len
-            min_response_len = 512  # Minimum space for response generation
-            max_safe_prompt_len = max_model_len - min_response_len
-            
+            # Tokenize revision prompts (already filtered for length during construction)
             revision_tokens = self.tokenizer.apply_chat_template(
                 revision_prompts_raw, tokenize=True, return_tensors="pt", return_dict=True,
                 continue_final_message=False, add_generation_prompt=True,
                 enable_thinking=enable_thinking,
-                max_length=min(self_distillation_cfg.max_reprompt_len, max_safe_prompt_len),
+                max_length=max_safe_prompt_len,
                 padding=True, truncation=True,
             )
-            
-            # Filter out prompts that are too long (leave room for response)
-            prompt_lengths = revision_tokens["attention_mask"].sum(dim=1)
-            valid_mask = prompt_lengths <= max_safe_prompt_len
-            num_filtered = (~valid_mask).sum().item()
-            
-            if num_filtered > 0:
-                logger.warning(f"Filtered {num_filtered} revision prompts that were too long (>{max_safe_prompt_len} tokens)")
-                # Keep only valid prompts
-                valid_indices = valid_mask.nonzero(as_tuple=True)[0]
-                if len(valid_indices) == 0:
-                    # All prompts were too long, skip revision entirely
-                    logger.warning("All revision prompts were too long, skipping teacher revision")
-                    return {}, {"improved_sdpo/num_revisions_filtered": num_filtered}
-                
-                revision_tokens = {
-                    "input_ids": revision_tokens["input_ids"][valid_indices],
-                    "attention_mask": revision_tokens["attention_mask"][valid_indices],
-                }
-                revision_uids = [revision_uids[i] for i in valid_indices.tolist()]
             
             # Build DataProto for generation
             revision_gen_batch = DataProto.from_dict(tensors={

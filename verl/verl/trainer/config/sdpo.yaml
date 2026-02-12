@@ -77,6 +77,15 @@ actor_rollout_ref:
         {feedback}
 
         Based on the feedback above, provide a corrected solution.
+      # Simplified template (without original_response) for when full prompt is too long
+      simplified_revision_template: |-
+        {prompt}
+
+        Feedback from a previous attempt:
+
+        {feedback}
+
+        Based on the feedback above, provide a correct solution.
     optim:
       # SDPO experiments use lr=1e-6 (10x smaller than typical PPO)
       lr: 1e-6
