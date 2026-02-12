@@ -26,7 +26,9 @@ actor_rollout_ref:
       distillation_add_tail: true
       teacher_update_rate: 0.01  # EMA rate from experiments (ema_update_rate)
       # Reprompting settings
-      max_reprompt_len: 10240
+      # max_reprompt_len: prompt + original_response + feedback
+      # Should leave room for response generation within max_model_len (18944)
+      max_reprompt_len: 8192
       is_clip: 2.0
       success_reward_threshold: 0.5
       include_environment_feedback: true

@@ -977,13 +977,37 @@ class RayPPOTrainer:
         
         if len(revision_uids) > 0:
             # Tokenize revision prompts
+            max_model_len = self.config.actor_rollout_ref.rollout.max_model_len
+            min_response_len = 512  # Minimum space for response generation
+            max_safe_prompt_len = max_model_len - min_response_len
+            
             revision_tokens = self.tokenizer.apply_chat_template(
                 revision_prompts_raw, tokenize=True, return_tensors="pt", return_dict=True,
                 continue_final_message=False, add_generation_prompt=True,
                 enable_thinking=enable_thinking,
-                max_length=self_distillation_cfg.max_reprompt_len,
+                max_length=min(self_distillation_cfg.max_reprompt_len, max_safe_prompt_len),
                 padding=True, truncation=True,
             )
+            
+            # Filter out prompts that are too long (leave room for response)
+            prompt_lengths = revision_tokens["attention_mask"].sum(dim=1)
+            valid_mask = prompt_lengths <= max_safe_prompt_len
+            num_filtered = (~valid_mask).sum().item()
+            
+            if num_filtered > 0:
+                logger.warning(f"Filtered {num_filtered} revision prompts that were too long (>{max_safe_prompt_len} tokens)")
+                # Keep only valid prompts
+                valid_indices = valid_mask.nonzero(as_tuple=True)[0]
+                if len(valid_indices) == 0:
+                    # All prompts were too long, skip revision entirely
+                    logger.warning("All revision prompts were too long, skipping teacher revision")
+                    return {}, {"improved_sdpo/num_revisions_filtered": num_filtered}
+                
+                revision_tokens = {
+                    "input_ids": revision_tokens["input_ids"][valid_indices],
+                    "attention_mask": revision_tokens["attention_mask"][valid_indices],
+                }
+                revision_uids = [revision_uids[i] for i in valid_indices.tolist()]
             
             # Build DataProto for generation
             revision_gen_batch = DataProto.from_dict(tensors={
@@ -991,12 +1015,23 @@ class RayPPOTrainer:
                 "attention_mask": revision_tokens["attention_mask"],
                 "position_ids": compute_position_id_with_mask(revision_tokens["attention_mask"]),
             })
+            # Calculate safe response length to stay within max_model_len
+            max_prompt_len = revision_tokens["input_ids"].shape[1]
+            max_model_len = self.config.actor_rollout_ref.rollout.max_model_len
+            # Leave buffer for response, but cap at data.max_response_length
+            safe_response_len = min(
+                max_model_len - max_prompt_len - 64,  # 64 token buffer
+                self.config.data.max_response_length
+            )
+            safe_response_len = max(safe_response_len, 256)  # At least 256 tokens
+            
             revision_gen_batch.meta_info = {
                 "eos_token_id": self.tokenizer.eos_token_id,
                 "pad_token_id": self.tokenizer.pad_token_id,
                 "recompute_log_prob": False,
                 "temperature": self.config.actor_rollout_ref.rollout.temperature,
                 "do_sample": True,
+                "response_length": safe_response_len,  # Limit response to stay within max_model_len
             }
             
             # Copy non_tensor_batch info for reward computation
