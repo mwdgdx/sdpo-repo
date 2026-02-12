@@ -313,6 +313,10 @@ EXTRA_ARGS="$EXTRA_ARGS data.train_batch_size=$TRAIN_BATCH_SIZE"
 # Do NOT override it here (SDPO experiments use 1, not $TRAIN_BATCH_SIZE)
 EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.optim.lr=$LEARNING_RATE"
 
+# Increase weight bucket size for large models (Qwen3-8B embedding is ~2.3GB)
+# Default 2048 MB is too small, need 4096 MB
+EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes=4096"
+
 # Improved SDPO overrides (experimental)
 if [ "$USE_IMPROVED_SDPO" = "true" ]; then
     echo ""
