@@ -1001,15 +1001,16 @@ class RayPPOTrainer:
             
             # Copy non_tensor_batch info for reward computation
             # We need to map each revision back to its original prompt info
+            # NOTE: All values must be numpy arrays for DataProto consistency
             revision_non_tensor = {}
             for key in ["raw_prompt", "data_source", "reward_model", "extra_info"]:
                 if key in batch.non_tensor_batch:
-                    revision_non_tensor[key] = [
+                    revision_non_tensor[key] = np.array([
                         batch.non_tensor_batch[key][uid_to_first_idx[uid]] 
                         for uid in revision_uids
-                    ]
+                    ], dtype=object)
+            revision_non_tensor["uid"] = np.array(revision_uids, dtype=object)
             revision_gen_batch.non_tensor_batch = revision_non_tensor
-            revision_gen_batch.non_tensor_batch["uid"] = np.array(revision_uids, dtype=object)
             
             # Pad to divisor if needed
             size_divisor = (
