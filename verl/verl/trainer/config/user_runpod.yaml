@@ -1,7 +1,7 @@
 # User configuration for 8x H100
 # All paths are set via environment variables from run_sdpo.sh
 #
-# Configuration: 8x H100 80GB, Full Fine-tuning, Qwen3-4B
+# Configuration: 8x H100 80GB, Full Fine-tuning, Qwen3-8B
 
 defaults:
   - _self_
@@ -23,8 +23,10 @@ actor_rollout_ref:
     ppo_max_token_len_per_gpu: ${max_model_len}
     clip_ratio_high: 0.28
     use_kl_loss: False
+    optim:
+      lr: 1e-6  # SDPO uses 1e-6, hardcoded to avoid env var issues
   model:
-    path: ${oc.env:MODEL_PATH}
+    path: ${oc.env:MODEL_PATH,Qwen/Qwen3-8B}
     trust_remote_code: True
     # LoRA configuration - set LORA_RANK > 0 to enable
     lora_rank: ${oc.decode:${oc.env:LORA_RANK,0}}
@@ -57,7 +59,7 @@ custom_reward_function:
 
 critic:
   model:
-    path: ${oc.env:MODEL_PATH}
+    path: ${oc.env:MODEL_PATH,Qwen/Qwen3-8B}
 
 reward_model:
   use_reward_loop: False

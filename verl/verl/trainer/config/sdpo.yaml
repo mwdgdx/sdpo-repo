@@ -43,7 +43,7 @@ actor_rollout_ref:
       # 2. If best is not perfect, uses teacher+feedback+original_response to revise
       # 3. Compares revised vs original, picks better one
       # 4. Loss = imitation_kl (learn best) + sdpo_kl (reduce errors)
-      improved_sdpo_min_reward_threshold: 0.5  # Min reward for best response to be used for imitation (should match success_reward_threshold)
+      improved_sdpo_min_reward_threshold: 0.1  # Min reward for best response to be used for imitation (lowered to trigger revision more often)
       # Reprompting template - combines prompt, solution section, and feedback section
       reprompt_template: |-
         {prompt}{solution}{feedback}

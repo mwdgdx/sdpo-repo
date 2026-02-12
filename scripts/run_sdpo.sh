@@ -1,17 +1,21 @@
 #!/bin/bash
 # SDPO Training Script for 8x H100
 # Usage: ./scripts/run_sdpo.sh [OPTIONS]
+#        ./scripts/run_sdpo.sh --yes   # Skip confirmation prompt
 #
-# Fixed Configuration: 8x H100 80GB, Full Fine-tuning, Qwen3-4B
+# Fixed Configuration: 8x H100 80GB, Full Fine-tuning, Qwen3-8B
+#
+# ⚠️  HARDCODED PARAMETERS (edit this file to change):
+#   MODEL_PATH     = Qwen/Qwen3-8B   (line ~117)
+#   LEARNING_RATE  = 1e-6            (line ~118)
+#   These are NOT overridable via environment variables to prevent accidents.
 #
 # Environment Variables (optional overrides):
-#   MODEL_PATH          - Hugging Face model path (default: Qwen/Qwen3-4B)
 #   TASK                - Task name, corresponds to datasets/<TASK>/ directory (default: lcb_v6)
 #   TOTAL_EPOCHS        - Total training epochs (default: 30)
 #   EXPERIMENT_NAME     - Experiment name for logging (default: sdpo_$TASK)
 #   SAVE_FREQ           - Checkpoint save frequency in iterations (default: 10)
 #   TEST_FREQ           - Validation frequency in iterations (default: 5)
-#   LEARNING_RATE       - Learning rate (default: 1e-6)
 #   TRAIN_BATCH_SIZE    - Training batch size (default: 32)
 #
 #   Improved SDPO (experimental):
@@ -111,8 +115,16 @@ export TRANSFORMERS_CACHE="${HF_HOME}"
 export HF_DATASETS_CACHE="${HF_HOME}/datasets"
 mkdir -p "$HF_HOME"
 
-# Model: Qwen3-8B for full fine-tuning (matching original SDPO)
-export MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3-8B}"
+# ============================================================================
+# CRITICAL: Model and Learning Rate (HARDCODED - do NOT use environment variables!)
+# These are the ONLY correct values for SDPO. If you need different values,
+# edit this file directly. Environment variables are ignored to prevent
+# accidental overrides from .env files or shell history.
+# ============================================================================
+export MODEL_PATH="Qwen/Qwen3-8B"  # HARDCODED: Qwen3-8B for full fine-tuning
+export LEARNING_RATE="1e-6"        # HARDCODED: SDPO uses 1e-6, NOT 1e-5!
+
+# Other settings (can be overridden via environment variables)
 export TASK="${TASK:-lcb_v6}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-30}"
 export EXPERIMENT_NAME="${EXPERIMENT_NAME:-sdpo_${TASK}}"
@@ -122,9 +134,6 @@ export PROJECT_NAME="${PROJECT_NAME:-${WANDB_PROJECT:-SDPO}}"
 export SAVE_FREQ="${SAVE_FREQ:-10}"
 export TEST_FREQ="${TEST_FREQ:-5}"
 export MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-2}"
-
-# Training settings (matching SDPO experiments/rich_feedback/run_sdpo.sh)
-export LEARNING_RATE="${LEARNING_RATE:-1e-6}"  # SDPO uses 1e-6, not 1e-5!
 
 # Improved SDPO settings (experimental)
 export USE_IMPROVED_SDPO="${USE_IMPROVED_SDPO:-true}"
@@ -195,6 +204,30 @@ echo "Post-training:"
 echo "  UPLOAD_CHECKPOINT: $UPLOAD_CHECKPOINT"
 echo "  HF_REPO_ID:        ${HF_REPO_ID:-<not set>}"
 echo "=============================================="
+
+# ============================================================================
+# User Confirmation (skip with --yes or YES=true)
+# ============================================================================
+if [ "$YES" != "true" ] && [ "$1" != "--yes" ] && [ "$1" != "-y" ]; then
+    echo ""
+    echo "╔════════════════════════════════════════════════════════════════════╗"
+    echo "║  🔍 PLEASE REVIEW THE CONFIGURATION ABOVE CAREFULLY!              ║"
+    echo "║                                                                    ║"
+    echo "║  Critical settings (HARDCODED - cannot be overridden):            ║"
+    echo "║    MODEL_PATH:     $MODEL_PATH"
+    echo "║    LEARNING_RATE:  $LEARNING_RATE"
+    echo "║                                                                    ║"
+    echo "║  If these are incorrect, edit scripts/run_sdpo.sh directly.       ║"
+    echo "╚════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    read -p "Proceed with training? [y/N] " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Training cancelled by user."
+        exit 0
+    fi
+    echo ""
+fi
 
 # Warn if no WandB credentials
 if [ -z "$WANDB_API_KEY" ]; then

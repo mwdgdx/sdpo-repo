@@ -864,18 +864,31 @@ class RayPPOTrainer:
         # ============================================================
         unique_uids = set(uids)
         min_reward_threshold = self_distillation_cfg.get("improved_sdpo_min_reward_threshold", 0.3)
-        num_needs_revision = sum(
-            1 for uid in unique_uids 
-            if min_reward_threshold <= best_by_uid[uid][1] < 1.0
-        )
-        avg_best_reward = np.mean([best_by_uid[uid][1] for uid in unique_uids])
+        
+        # Count groups that need revision (all non-perfect responses, i.e., reward < 1.0)
+        best_rewards = [best_by_uid[uid][1] for uid in unique_uids]
+        num_needs_revision = sum(1 for r in best_rewards if r < 1.0)  # All non-perfect need revision
+        num_below_threshold = sum(1 for r in best_rewards if r < min_reward_threshold)
+        num_perfect = sum(1 for r in best_rewards if r >= 1.0)
+        avg_best_reward = np.mean(best_rewards)
+        
+        # Compute feedback metrics (matching original SDPO)
+        num_with_feedback_available = sum(1 for f in feedback_list if f is not None)
+        num_with_feedback_used = sum(feedback_used)
         
         metrics = {
             "improved_sdpo/num_groups_need_revision": num_needs_revision,
+            "improved_sdpo/num_groups_below_threshold": num_below_threshold,
+            "improved_sdpo/num_groups_perfect": num_perfect,
             "improved_sdpo/avg_best_reward_before_revision": avg_best_reward,
+            "improved_sdpo/min_best_reward": min(best_rewards) if best_rewards else 0.0,
+            "improved_sdpo/max_best_reward": max(best_rewards) if best_rewards else 0.0,
             "improved_sdpo/sdpo_mask_fraction": sdpo_mask.float().mean().item(),
             "self_distillation/success_group_fraction": len([uid for uid in unique_uids if len(success_by_uid[uid]) > 0]) / len(unique_uids),
             "self_distillation/success_sample_fraction": sum(1 for s in solution_strs if s is not None) / batch_size,
+            "self_distillation/feedback_available_fraction": num_with_feedback_available / batch_size,
+            "self_distillation/feedback_used_fraction": num_with_feedback_used / batch_size,
+            "self_distillation/reprompt_sample_fraction": sdpo_mask.float().mean().item(),
         }
         
         return DataProto.from_dict(tensors={
@@ -935,7 +948,9 @@ class RayPPOTrainer:
             best_idx, best_reward = best_by_uid[uid]
             first_idx = uid_to_first_idx[uid]
             
-            if min_reward_threshold <= best_reward < 1.0:
+            # Try revision for ALL non-perfect responses (reward < 1.0)
+            # Even if best_reward is low, revision might improve it significantly
+            if best_reward < 1.0:
                 # Need revision
                 revision_uids.append(uid)
                 
@@ -1050,19 +1065,15 @@ class RayPPOTrainer:
             uid = uids[i]
             best_idx, best_reward = best_by_uid[uid]
             
-            if best_reward < min_reward_threshold:
-                # Best response too bad, skip imitation
-                imitation_target_idx.append(i)
-                imitation_target_is_revised.append(False)
-                imitation_mask.append(False)
-            elif uid in revised_by_uid:
-                # Check if revised is better
+            # Step 1: Determine the best available target (original or revised)
+            use_revised = False
+            final_reward = best_reward
+            
+            if uid in revised_by_uid:
                 revised_text, revised_reward = revised_by_uid[uid]
                 if revised_reward > best_reward:
-                    # Use revised
-                    imitation_target_idx.append(-1)  # Special marker for revised
-                    imitation_target_is_revised.append(True)
-                    imitation_mask.append(True)
+                    use_revised = True
+                    final_reward = revised_reward
                     
                     # Tokenize revised response if not already
                     if uid not in revised_response_tensors:
@@ -1081,19 +1092,25 @@ class RayPPOTrainer:
                                 torch.full((1, pad_len), self.tokenizer.pad_token_id, dtype=torch.long)
                             ], dim=1)
                         elif revised_tokens.shape[1] > responses.shape[1]:
-                            # Truncate if longer (shouldn't happen due to max_length, but just in case)
                             revised_tokens = revised_tokens[:, :responses.shape[1]]
                         revised_response_tensors[uid] = revised_tokens[0].to(device)
+            
+            # Step 2: Decide whether to participate in imitation based on FINAL reward
+            # (after considering revision improvement)
+            if final_reward >= min_reward_threshold:
+                # Good enough to learn from (either original best or improved via revision)
+                if use_revised:
+                    imitation_target_idx.append(-1)  # Special marker for revised
+                    imitation_target_is_revised.append(True)
                 else:
-                    # Original is better
                     imitation_target_idx.append(best_idx)
                     imitation_target_is_revised.append(False)
-                    imitation_mask.append(True)
-            else:
-                # No revision needed or done, use original best
-                imitation_target_idx.append(best_idx)
-                imitation_target_is_revised.append(False)
                 imitation_mask.append(True)
+            else:
+                # Even after revision attempt, reward is too low to learn from
+                imitation_target_idx.append(i)
+                imitation_target_is_revised.append(False)
+                imitation_mask.append(False)
         
         # ============================================================
         # Step 5: Build imitation tensors
@@ -2257,6 +2274,10 @@ class RayPPOTrainer:
                         # SDPO: Build self-distillation batch if enabled (loss_mode == 'sdpo')
                         # First try improved SDPO, fall back to original SDPO
                         improved_sdpo_data = self._build_improved_sdpo_batch(batch, reward_tensor, reward_extra_infos_dict)
+                        
+                        # DEBUG: Log whether improved SDPO is enabled
+                        metrics["improved_sdpo/debug_build_returned_data"] = 1.0 if improved_sdpo_data is not None else 0.0
+                        
                         if improved_sdpo_data is not None:
                             # Improved SDPO is enabled - first add SDPO KL batch
                             improved_sdpo_batch, improved_sdpo_metrics = improved_sdpo_data
@@ -2268,7 +2289,17 @@ class RayPPOTrainer:
                                 imitation_batch, imitation_metrics = self._do_teacher_rollout_for_improved_sdpo(
                                     batch, self.reward_fn
                                 )
+                                
+                                # DEBUG: Log imitation batch info
+                                metrics["improved_sdpo/debug_imitation_batch_keys"] = len(imitation_batch.batch.keys()) if imitation_batch.batch is not None else 0.0
+                                metrics["improved_sdpo/debug_has_imitation_teacher_ids"] = 1.0 if "imitation_teacher_input_ids" in imitation_batch.batch.keys() else 0.0
+                                
                                 batch = batch.union(imitation_batch)
+                                
+                                # DEBUG: Log final batch info after union
+                                metrics["improved_sdpo/debug_final_batch_keys"] = len(batch.batch.keys())
+                                metrics["improved_sdpo/debug_final_has_imitation"] = 1.0 if "imitation_teacher_input_ids" in batch.batch.keys() else 0.0
+                                
                                 metrics.update(imitation_metrics)
                         else:
                             # Fall back to original SDPO

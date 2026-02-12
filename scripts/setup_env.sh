@@ -124,16 +124,21 @@ fi
 N_GPUS=8
 LORA_RANK=0
 TRAIN_BATCH_SIZE=32
-MODEL_PATH="Qwen/Qwen3-4B"
+MODEL_PATH="Qwen/Qwen3-8B"    # IMPORTANT: Use 8B, not 4B!
+LEARNING_RATE="1e-6"          # IMPORTANT: SDPO uses 1e-6, not 1e-5!
 
 echo ""
 echo "=============================================="
 echo "Hardware Configuration (Fixed)"
 echo "=============================================="
-echo "  GPUs:       8x H100 80GB"
-echo "  Mode:       Full Fine-tuning (no LoRA)"
-echo "  Model:      $MODEL_PATH"
-echo "  Batch Size: $TRAIN_BATCH_SIZE"
+echo "  GPUs:         8x H100 80GB"
+echo "  Mode:         Full Fine-tuning (no LoRA)"
+echo "  Model:        $MODEL_PATH"
+echo "  Learning Rate: $LEARNING_RATE"
+echo "  Batch Size:   $TRAIN_BATCH_SIZE"
+echo ""
+echo "NOTE: MODEL_PATH and LEARNING_RATE are HARDCODED in run_sdpo.sh"
+echo "      and will NOT be overridden by .env file."
 echo "=============================================="
 
 # Save to .env file for persistence
@@ -154,13 +159,15 @@ export HF_TOKEN="${HF_TOKEN}"
 export HF_REPO_ID="${HF_REPO_ID}"
 
 # Training configuration (fixed for 8x H100)
+# NOTE: MODEL_PATH and LEARNING_RATE are now HARDCODED in run_sdpo.sh
+# These values here are for reference only - run_sdpo.sh will override them
 export MODEL_PATH="${MODEL_PATH}"
 export TASK="${TASK:-lcb_v6}"
 export N_GPUS="${N_GPUS}"
 export TOTAL_EPOCHS="${TOTAL_EPOCHS:-30}"
 export LORA_RANK="${LORA_RANK}"
 export TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE}"
-export LEARNING_RATE="${LEARNING_RATE:-1e-5}"
+export LEARNING_RATE="${LEARNING_RATE}"
 EOF
 
 echo "✓ Configuration saved to ${ENV_FILE}"
@@ -266,10 +273,11 @@ echo "✅ Setup Complete!"
 echo "=============================================="
 echo ""
 echo "Hardware Configuration:"
-echo "  GPUs:        8x H100 80GB"
-echo "  Mode:        Full Fine-tuning"
-echo "  Model:       $MODEL_PATH"
-echo "  Batch Size:  $TRAIN_BATCH_SIZE"
+echo "  GPUs:          8x H100 80GB"
+echo "  Mode:          Full Fine-tuning"
+echo "  Model:         $MODEL_PATH (HARDCODED in run_sdpo.sh)"
+echo "  Learning Rate: $LEARNING_RATE (HARDCODED in run_sdpo.sh)"
+echo "  Batch Size:    $TRAIN_BATCH_SIZE"
 echo ""
 echo "Credentials:"
 echo "  WANDB_API_KEY:  ${WANDB_API_KEY:+[SET]}${WANDB_API_KEY:-[NOT SET]}"
@@ -288,8 +296,11 @@ echo "=============================================="
 echo "Ready to train! Run:"
 echo "=============================================="
 echo ""
-echo "  source ${ENV_FILE}  # Load your credentials"
+echo "  source ${ENV_FILE}  # Load WandB/HF credentials (optional)"
 echo "  ${SCRIPT_DIR}/run_sdpo.sh"
+echo ""
+echo "NOTE: MODEL_PATH and LEARNING_RATE are HARDCODED in run_sdpo.sh"
+echo "      and cannot be changed via .env file (to prevent accidents)."
 echo ""
 if [ -n "$HF_TOKEN" ] && [ -n "$HF_REPO_ID" ]; then
     echo "After training completes:"

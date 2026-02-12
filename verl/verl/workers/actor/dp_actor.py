@@ -652,6 +652,23 @@ class DataParallelPPOActor(BasePPOActor):
         # SDPO: Include teacher keys if enabled
         if self_distillation_enabled:
             select_keys.extend(list(self_distillation_required_keys))
+        
+        # Improved SDPO: Include imitation keys if present
+        improved_sdpo_keys = [
+            "imitation_teacher_input_ids",
+            "imitation_teacher_attention_mask",
+            "imitation_teacher_position_ids",
+            "imitation_student_input_ids",
+            "imitation_student_attention_mask",
+            "imitation_student_position_ids",
+            "imitation_target_response_ids",
+            "imitation_target_response_mask",
+            "imitation_mask",
+        ]
+        for key in improved_sdpo_keys:
+            if key in data.batch.keys():
+                select_keys.append(key)
+        
         # Include pre-computed IS weights if present in batch
         # Weights are computed centrally in trainer and added to batch when algorithm.rollout_is=True
         if "rollout_is_weights" in data.batch.keys():
@@ -805,7 +822,15 @@ class DataParallelPPOActor(BasePPOActor):
                         # Improved SDPO: Add Imitation KL Loss
                         # =========================================================
                         use_improved_sdpo = self_distillation_cfg.get("use_improved_sdpo", False)
-                        if use_improved_sdpo and "imitation_teacher_input_ids" in model_inputs:
+                        has_imitation_data = "imitation_teacher_input_ids" in model_inputs
+                        
+                        # DEBUG: Log whether imitation is enabled
+                        if use_improved_sdpo:
+                            pg_metrics["improved_sdpo/debug_use_improved_sdpo"] = 1.0
+                            pg_metrics["improved_sdpo/debug_has_imitation_data"] = 1.0 if has_imitation_data else 0.0
+                            pg_metrics["improved_sdpo/debug_model_inputs_keys"] = len(model_inputs.keys())
+                        
+                        if use_improved_sdpo and has_imitation_data:
                             imitation_loss_weight = self_distillation_cfg.get("imitation_loss_weight", 0.5)
                             imitation_mask = model_inputs.get("imitation_mask", None)
                             

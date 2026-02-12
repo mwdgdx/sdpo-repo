@@ -10,7 +10,9 @@ def compute_score(
     """
     if data_source in ["code", "livecodebench", "humanevalplus"]:
         from verl.utils.reward_score.feedback import code
-        results = code.compute_score(solution_str, ground_truth, extra_info, sparse_rewards=True, max_test_cases=None)
+        # Use dense rewards (pass rate) instead of sparse (all-or-nothing)
+        # This gives finer-grained signal for improved SDPO's revision and imitation
+        results = code.compute_score(solution_str, ground_truth, extra_info, sparse_rewards=False, max_test_cases=None)
     elif data_source in ["math", "math500", "dapo_math", "gsm8k"]:
         from verl.utils.reward_score.feedback import math
         results = math.compute_score(solution_str, ground_truth, extra_info)
