@@ -2365,6 +2365,12 @@ class RayPPOTrainer:
                             metrics.update(improved_sdpo_metrics)
                             
                             # Then do teacher rollout for imitation targets
+                            # NOTE: In async mode, replicas were put to sleep after normal rollout.
+                            # We must wake them up before doing revision rollout, then sleep again after.
+                            if self.async_rollout_mode:
+                                print("[Improved SDPO] Waking up rollout replicas for teacher revision rollout...", flush=True)
+                                self.checkpoint_manager.wake_up_replicas()
+                            
                             with marked_timer("teacher_rollout", timing_raw, color="cyan"):
                                 imitation_batch, imitation_metrics = self._do_teacher_rollout_for_improved_sdpo(
                                     batch, self.reward_fn
@@ -2381,6 +2387,11 @@ class RayPPOTrainer:
                                 metrics["improved_sdpo/debug_final_has_imitation"] = 1.0 if "imitation_teacher_input_ids" in batch.batch.keys() else 0.0
                                 
                                 metrics.update(imitation_metrics)
+                            
+                            # Put replicas back to sleep after teacher rollout
+                            if self.async_rollout_mode:
+                                print("[Improved SDPO] Putting rollout replicas back to sleep...", flush=True)
+                                self.checkpoint_manager.sleep_replicas()
                         else:
                             # Fall back to original SDPO
                             self_distillation_data = self._maybe_build_self_distillation_batch(batch, reward_tensor, reward_extra_infos_dict)
