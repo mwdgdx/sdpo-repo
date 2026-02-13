@@ -1055,8 +1055,12 @@ class RayPPOTrainer:
             # Copy non_tensor_batch info for reward computation
             # We need to map each revision back to its original prompt info
             # NOTE: All values must be numpy arrays for DataProto consistency
+            # CRITICAL: Use revision_prompts_raw (with feedback) for raw_prompt!
+            # The SingleTurnAgentLoop re-tokenizes from raw_prompt, ignoring input_ids.
             revision_non_tensor = {}
-            for key in ["raw_prompt", "data_source", "reward_model", "extra_info"]:
+            revision_non_tensor["raw_prompt"] = np.array(revision_prompts_raw, dtype=object)
+            # Keep other fields from original batch for reward computation
+            for key in ["data_source", "reward_model", "extra_info"]:
                 if key in batch.non_tensor_batch:
                     revision_non_tensor[key] = np.array([
                         batch.non_tensor_batch[key][uid_to_first_idx[uid]] 
