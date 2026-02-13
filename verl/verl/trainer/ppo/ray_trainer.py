@@ -1105,6 +1105,16 @@ class RayPPOTrainer:
             # Unpad
             revision_output = unpad_dataproto(revision_output_padded, pad_size=pad_size)
             
+            # Re-attach non_tensor_batch fields lost by agent loop's _postprocess.
+            # The agent loop creates a fresh non_tensor_batch with only __num_turns__
+            # and extra_fields, dropping reward_model, data_source, etc. that the
+            # reward manager needs.
+            for key in ["data_source", "reward_model", "extra_info"]:
+                if key in revision_non_tensor:
+                    revision_output.non_tensor_batch[key] = revision_non_tensor[key][:len(revision_output)]
+            if "uid" not in revision_output.non_tensor_batch:
+                revision_output.non_tensor_batch["uid"] = revision_non_tensor["uid"][:len(revision_output)]
+            
             # ============================================================
             # Step 3: Compute rewards for revised responses
             # ============================================================
