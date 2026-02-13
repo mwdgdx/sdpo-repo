@@ -949,7 +949,9 @@ class RayPPOTrainer:
             "{prompt}\n\nFeedback from a previous attempt:\n{feedback}\n\nBased on the feedback above, provide a correct solution.")
         
         max_model_len = self.config.actor_rollout_ref.rollout.max_model_len
-        min_response_len = 512  # Minimum space for response generation
+        # Reserve at least half of max_response_length for response generation
+        # For code tasks, responses need to be reasonably long
+        min_response_len = self.config.data.max_response_length // 2  # 4096 if max_response_length=8192
         max_safe_prompt_len = max_model_len - min_response_len
         
         for uid in unique_uids:
