@@ -949,10 +949,20 @@ class RayPPOTrainer:
             "{prompt}\n\nFeedback from a previous attempt:\n{feedback}\n\nBased on the feedback above, provide a correct solution.")
         
         max_model_len = self.config.actor_rollout_ref.rollout.max_model_len
-        # Reserve at least half of max_response_length for response generation
-        # For code tasks, responses need to be reasonably long
-        min_response_len = self.config.data.max_response_length // 2  # 4096 if max_response_length=8192
-        max_safe_prompt_len = max_model_len - min_response_len
+        # vLLM calculates max_tokens = response_length + prompt_length - len(prompt_ids)
+        # For this to be positive and reasonable, we need:
+        # len(prompt_ids) < response_length + prompt_length
+        # With typical config: response_length=8192, prompt_length=2048 -> limit is ~10240
+        # To be safe, limit prompt to max_model_len - response_length to ensure enough space
+        response_length = self.config.actor_rollout_ref.rollout.response_length
+        prompt_length = self.config.actor_rollout_ref.rollout.prompt_length
+        # Use the vLLM constraint: prompt + response must fit in max_model_len
+        # Leave buffer for vLLM's internal calculations
+        max_safe_prompt_len = min(
+            max_model_len - response_length - 256,  # Ensure space for full response + buffer
+            response_length + prompt_length - 512,   # Match vLLM's max_tokens calculation
+        )
+        logger.info(f"Improved SDPO: max_safe_prompt_len={max_safe_prompt_len} (max_model_len={max_model_len}, response_length={response_length})")
         
         for uid in unique_uids:
             best_idx, best_reward = best_by_uid[uid]
