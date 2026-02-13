@@ -883,12 +883,14 @@ class DataParallelPPOActor(BasePPOActor):
                             imitation_student_all_logps = imitation_student_outputs.get("all_logps") if return_all_logps else None
                             imitation_student_topk_logps = imitation_student_outputs.get("topk_logps") if distill_topk else None
                             
-                            # Compute imitation KL loss
+                            # Compute imitation KL loss (without IS clipping since there's no old_log_probs)
+                            imitation_distill_cfg = dict(self_distillation_cfg)
+                            imitation_distill_cfg.pop("is_clip", None)
                             imitation_loss, imitation_metrics = compute_self_distillation_loss(
                                 student_log_probs=imitation_student_log_probs,
                                 teacher_log_probs=imitation_teacher_log_probs,
                                 response_mask=imitation_target_mask,
-                                self_distillation_config=self_distillation_cfg,
+                                self_distillation_config=imitation_distill_cfg,
                                 old_log_probs=None,  # No old log probs for imitation
                                 student_all_log_probs=imitation_student_all_logps,
                                 teacher_all_log_probs=imitation_teacher_all_logps,
