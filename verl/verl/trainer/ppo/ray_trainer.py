@@ -962,7 +962,7 @@ class RayPPOTrainer:
             max_model_len - response_length - 256,  # Ensure space for full response + buffer
             response_length + prompt_length - 512,   # Match vLLM's max_tokens calculation
         )
-        logger.info(f"Improved SDPO: max_safe_prompt_len={max_safe_prompt_len} (max_model_len={max_model_len}, response_length={response_length})")
+        print(f"[Improved SDPO] max_safe_prompt_len={max_safe_prompt_len} (max_model_len={max_model_len}, response_length={response_length})")
         
         for uid in unique_uids:
             best_idx, best_reward = best_by_uid[uid]
@@ -1016,10 +1016,10 @@ class RayPPOTrainer:
                         # Simplified prompt fits
                         revision_uids.append(uid)
                         revision_prompts_raw.append(simplified_messages)
-                        logger.info(f"Using simplified revision prompt for uid {uid} (saved {full_len - simplified_len} tokens)")
+                        print(f"[Improved SDPO] Using simplified revision prompt for uid {uid} (saved {full_len - simplified_len} tokens)")
                     else:
                         # Even simplified is too long, skip
-                        logger.warning(f"Skipping revision for uid {uid}: even simplified prompt is too long ({simplified_len} > {max_safe_prompt_len})")
+                        print(f"[Improved SDPO] WARNING: Skipping revision for uid {uid}: even simplified prompt is too long ({simplified_len} > {max_safe_prompt_len})")
         
         # ============================================================
         # Step 2: Teacher rollout (if any prompts need revision)
