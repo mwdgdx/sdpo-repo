@@ -2150,6 +2150,11 @@ class RayPPOTrainer:
 
                 is_last_step = self.global_steps >= self.total_training_steps
                 with marked_timer("step", timing_raw):
+                    _use_improved_sdpo = (
+                        self.config.actor_rollout_ref.actor.get("self_distillation", {}).get("use_improved_sdpo", False)
+                        and self.config.actor_rollout_ref.actor.policy_loss.get("loss_mode", "vanilla") == "sdpo"
+                    )
+
                     # generate a batch
                     with marked_timer("gen", timing_raw, color="red"):
                         if not self.async_rollout_mode:
@@ -2161,10 +2166,6 @@ class RayPPOTrainer:
                             # NOTE: If improved SDPO is enabled, delay sleep_replicas() until after
                             # the teacher revision rollout, because HYBRID mode replicas cannot be
                             # woken up independently (wake_up raises ValueError in HYBRID mode).
-                            _use_improved_sdpo = (
-                                self.config.actor_rollout_ref.actor.get("self_distillation", {}).get("use_improved_sdpo", False)
-                                and self.config.actor_rollout_ref.actor.policy_loss.get("loss_mode", "vanilla") == "sdpo"
-                            )
                             if not _use_improved_sdpo:
                                 self.checkpoint_manager.sleep_replicas()
                             if curr_step_profile:
@@ -2255,6 +2256,39 @@ class RayPPOTrainer:
                             reward_tensor, reward_extra_infos_dict = self._compute_or_extract_reward(
                                 batch, reward_fn=self.reward_fn, reward_for_val=False
                             )
+
+                    # ============================================================
+                    # Improved SDPO: teacher rollout MUST happen before sleep_replicas
+                    # because vLLM needs to be awake for generation. We do it here
+                    # (after reward, before old_log_prob) so that sleep frees GPU
+                    # memory in time for compute_old_log_prob.
+                    # ============================================================
+                    _improved_sdpo_done = False
+                    if _use_improved_sdpo and not self.config.reward_model.launch_reward_fn_async:
+                        improved_sdpo_data = self._build_improved_sdpo_batch(
+                            batch, reward_tensor, reward_extra_infos_dict
+                        )
+                        metrics["improved_sdpo/debug_build_returned_data"] = (
+                            1.0 if improved_sdpo_data is not None else 0.0
+                        )
+                        if improved_sdpo_data is not None:
+                            improved_sdpo_batch, improved_sdpo_metrics = improved_sdpo_data
+                            batch = batch.union(improved_sdpo_batch)
+                            metrics.update(improved_sdpo_metrics)
+
+                            with marked_timer("teacher_rollout", timing_raw, color="cyan"):
+                                imitation_batch, imitation_metrics = (
+                                    self._do_teacher_rollout_for_improved_sdpo(batch, self.reward_fn)
+                                )
+                                batch = batch.union(imitation_batch)
+                                metrics.update(imitation_metrics)
+
+                            _improved_sdpo_done = True
+
+                        # Sleep replicas now - all vLLM work is done
+                        if self.async_rollout_mode:
+                            print("[Improved SDPO] All rollouts done, sleeping replicas...", flush=True)
+                            self.checkpoint_manager.sleep_replicas()
 
                     # Operating Mode Selection:
                     # - Bypass mode: Sets old_log_probs = rollout_log_probs (2 policies: π_rollout, π_θ)
@@ -2366,53 +2400,17 @@ class RayPPOTrainer:
                             config=self.config.algorithm,
                         )
 
-                        # SDPO: Build self-distillation batch if enabled (loss_mode == 'sdpo')
-                        # First try improved SDPO, fall back to original SDPO
-                        improved_sdpo_data = self._build_improved_sdpo_batch(batch, reward_tensor, reward_extra_infos_dict)
-                        
-                        # DEBUG: Log whether improved SDPO is enabled
-                        metrics["improved_sdpo/debug_build_returned_data"] = 1.0 if improved_sdpo_data is not None else 0.0
-                        
-                        if improved_sdpo_data is not None:
-                            # Improved SDPO is enabled - first add SDPO KL batch
-                            improved_sdpo_batch, improved_sdpo_metrics = improved_sdpo_data
-                            batch = batch.union(improved_sdpo_batch)
-                            metrics.update(improved_sdpo_metrics)
-                            
-                            # Then do teacher rollout for imitation targets
-                            with marked_timer("teacher_rollout", timing_raw, color="cyan"):
-                                imitation_batch, imitation_metrics = self._do_teacher_rollout_for_improved_sdpo(
-                                    batch, self.reward_fn
-                                )
-                                
-                                # DEBUG: Log imitation batch info
-                                metrics["improved_sdpo/debug_imitation_batch_keys"] = len(imitation_batch.batch.keys()) if imitation_batch.batch is not None else 0.0
-                                metrics["improved_sdpo/debug_has_imitation_teacher_ids"] = 1.0 if "imitation_teacher_input_ids" in imitation_batch.batch.keys() else 0.0
-                                
-                                batch = batch.union(imitation_batch)
-                                
-                                # DEBUG: Log final batch info after union
-                                metrics["improved_sdpo/debug_final_batch_keys"] = len(batch.batch.keys())
-                                metrics["improved_sdpo/debug_final_has_imitation"] = 1.0 if "imitation_teacher_input_ids" in batch.batch.keys() else 0.0
-                                
-                                metrics.update(imitation_metrics)
-                            
-                            # Now that all rollout work is done, sleep replicas to free GPU memory for training.
-                            # This was deferred from the normal rollout because teacher rollout needs awake replicas.
-                            if self.async_rollout_mode:
-                                print("[Improved SDPO] All rollouts done, sleeping replicas for training...", flush=True)
-                                self.checkpoint_manager.sleep_replicas()
-                        else:
-                            # Fall back to original SDPO
-                            self_distillation_data = self._maybe_build_self_distillation_batch(batch, reward_tensor, reward_extra_infos_dict)
+                        # SDPO: Build self-distillation batch if not already done earlier.
+                        # Improved SDPO was handled before compute_old_log_prob (needs vLLM awake).
+                        # If not done, fall back to original SDPO.
+                        if not _improved_sdpo_done:
+                            self_distillation_data = self._maybe_build_self_distillation_batch(
+                                batch, reward_tensor, reward_extra_infos_dict
+                            )
                             if self_distillation_data is not None:
                                 self_distillation_batch, self_distillation_metrics = self_distillation_data
                                 batch = batch.union(self_distillation_batch)
                                 metrics.update(self_distillation_metrics)
-                            # Safety: if sleep was deferred for improved SDPO but we ended up
-                            # in the fallback branch, sleep now before training begins.
-                            if self.async_rollout_mode and _use_improved_sdpo:
-                                self.checkpoint_manager.sleep_replicas()
 
                     # update critic
                     if self.use_critic:
