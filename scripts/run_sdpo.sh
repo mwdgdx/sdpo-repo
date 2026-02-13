@@ -140,6 +140,10 @@ export USE_IMPROVED_SDPO="${USE_IMPROVED_SDPO:-true}"
 export IMITATION_LOSS_WEIGHT="${IMITATION_LOSS_WEIGHT:-0.5}"
 export IMPROVED_SDPO_MIN_REWARD="${IMPROVED_SDPO_MIN_REWARD:-0.5}"
 
+# vLLM settings (workaround for CUDA graph bug in vLLM v1)
+# Set to true to disable CUDA graph and use eager mode
+export ENFORCE_EAGER="${ENFORCE_EAGER:-true}"
+
 # WandB configuration
 export WANDB_PROJECT="${WANDB_PROJECT:-$PROJECT_NAME}"
 
@@ -316,6 +320,10 @@ EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.actor.optim.lr=$LEARNING_RATE"
 # Increase weight bucket size for large models (Qwen3-8B embedding is ~2.3GB)
 # Default 2048 MB is too small, need 4096 MB
 EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes=4096"
+
+# Increase max_cudagraph_capture_size to handle long revision prompts
+# Default 512 causes flash_attn metadata buffer overflow when total_num_scheduled_tokens > 512
+EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.rollout.engine_kwargs.vllm.compilation_config.max_cudagraph_capture_size=8192"
 
 # Improved SDPO overrides (experimental)
 if [ "$USE_IMPROVED_SDPO" = "true" ]; then

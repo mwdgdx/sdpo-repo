@@ -1079,6 +1079,18 @@ class RayPPOTrainer:
             revision_non_tensor["uid"] = np.array(revision_uids, dtype=object)
             revision_gen_batch.non_tensor_batch = revision_non_tensor
             
+            # DEBUG: Print what we're sending to vLLM
+            print(f"[Improved SDPO DEBUG] num_revision_uids={len(revision_uids)}")
+            print(f"[Improved SDPO DEBUG] revision_gen_batch.batch keys: {list(revision_gen_batch.batch.keys())}")
+            print(f"[Improved SDPO DEBUG] revision_gen_batch.non_tensor_batch keys: {list(revision_gen_batch.non_tensor_batch.keys())}")
+            print(f"[Improved SDPO DEBUG] revision_gen_batch.meta_info: {revision_gen_batch.meta_info}")
+            if len(revision_prompts_raw) > 0:
+                sample_prompt = revision_prompts_raw[0]
+                print(f"[Improved SDPO DEBUG] sample raw_prompt type: {type(sample_prompt)}")
+                print(f"[Improved SDPO DEBUG] sample raw_prompt length: {len(sample_prompt)}")
+                if len(sample_prompt) > 0:
+                    print(f"[Improved SDPO DEBUG] sample raw_prompt[0]: {sample_prompt[0]}")
+            
             # Pad to divisor if needed
             size_divisor = (
                 self.config.actor_rollout_ref.rollout.actor.tensor_parallel_size
