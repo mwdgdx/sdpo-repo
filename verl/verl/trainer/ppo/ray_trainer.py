@@ -2402,6 +2402,10 @@ class RayPPOTrainer:
                                 self_distillation_batch, self_distillation_metrics = self_distillation_data
                                 batch = batch.union(self_distillation_batch)
                                 metrics.update(self_distillation_metrics)
+                            # Safety: if sleep was deferred for improved SDPO but we ended up
+                            # in the fallback branch, sleep now before training begins.
+                            if self.async_rollout_mode and _use_improved_sdpo:
+                                self.checkpoint_manager.sleep_replicas()
 
                     # update critic
                     if self.use_critic:
