@@ -323,7 +323,7 @@ EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.rollout.checkpoint_engine.update_weigh
 
 # Increase max_cudagraph_capture_size to handle long revision prompts
 # Default 512 causes flash_attn metadata buffer overflow when total_num_scheduled_tokens > 512
-EXTRA_ARGS="$EXTRA_ARGS actor_rollout_ref.rollout.engine_kwargs.vllm.compilation_config.max_cudagraph_capture_size=8192"
+EXTRA_ARGS="$EXTRA_ARGS +actor_rollout_ref.rollout.engine_kwargs.vllm.compilation_config.max_cudagraph_capture_size=8192"
 
 # Improved SDPO overrides (experimental)
 if [ "$USE_IMPROVED_SDPO" = "true" ]; then
