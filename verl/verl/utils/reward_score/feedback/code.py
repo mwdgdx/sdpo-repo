@@ -19,7 +19,7 @@ INCORRECT_FORMAT = "Incorrect format"
 TIMEOUT = "Time out"
 ERROR_PREFIX = "Error: "
 OUTER_ERROR_PREFIX = "ERROR: "
-MAX_ADDITIONAL_MEMORY_BYTES = 512 * 1024 * 1024  # 512MB (reduced from 1GB to allow more parallel processes)
+MAX_ADDITIONAL_MEMORY_BYTES = 1024 * 1024 * 1024  # 1GB
 DEFAULT_TIMEOUT = 1
 TIMEOUT_SCALER = 1.0
 FORMAT_PENALTY = False
@@ -578,43 +578,19 @@ def run_tests_for_one_example(test_cases, completion, send_conn, sparse_rewards,
         # End INNER block
 
     except BaseException as outer_e:
-        # Error in OUTER block - be careful with MemoryError, don't try to stringify large objects
-        try:
-            err_type = type(outer_e).__name__
-            # Don't stringify the exception if it's MemoryError (can cause another OOM)
-            if isinstance(outer_e, MemoryError):
-                err_msg = "MemoryError (code used too much memory)"
-            else:
-                err_msg = str(outer_e)[:500]  # Limit error message length
-            print(f"[{test_idx}] OUTER EXCEPTION: {err_type}: {err_msg}\n")
-        except Exception:
-            pass  # Silently ignore if even this fails
+        # Error in OUTER block
+        print(f"[{test_idx}] OUTER EXCEPTION: {type(outer_e).__name__}: {outer_e}\n")
 
-        try:
-            record = {
-                "test_idx": test_idx,
-                "input": test_input[:1000] if test_input else "",  # Limit size
-                "expected": test_output[:1000] if test_output else "",  # Limit size
-                "actual": f"{OUTER_ERROR_PREFIX}MemoryError" if isinstance(outer_e, MemoryError) else f"{OUTER_ERROR_PREFIX}{_short_trace(outer_e)}",
-                "passed": False,
-                "debug": "",
-                "time": float("inf"),
-            }
-            send_conn.send(record)
-        except Exception:
-            # Last resort - send minimal record
-            try:
-                send_conn.send({
-                    "test_idx": test_idx,
-                    "input": "",
-                    "expected": "",
-                    "actual": f"{OUTER_ERROR_PREFIX}MemoryError",
-                    "passed": False,
-                    "debug": "",
-                    "time": float("inf"),
-                })
-            except Exception:
-                pass
+        record = {
+            "test_idx": test_idx,
+            "input": test_input,
+            "expected": test_output,
+            "actual": f"{OUTER_ERROR_PREFIX}{_short_trace(outer_e)}",
+            "passed": False,
+            "debug": "",
+            "time": float("inf"),
+        }
+        send_conn.send(record)
 
     finally:
         sys.stderr = old_stderr
