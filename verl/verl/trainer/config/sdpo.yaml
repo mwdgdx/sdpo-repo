@@ -38,9 +38,7 @@ actor_rollout_ref:
       # ============================================================
       # Improved SDPO settings (set use_improved_sdpo: true to enable)
       # ============================================================
-      # TEMPORARILY DISABLED: vLLM CUDA error during teacher revision rollout
-      # TODO: debug vLLM flash_attn scheduler_metadata issue
-      use_improved_sdpo: false  # Enable improved SDPO algorithm
+      use_improved_sdpo: true  # Enable improved SDPO algorithm
       imitation_loss_weight: 0.5  # Weight for imitation KL loss (alpha in paper)
       # When enabled, the algorithm:
       # 1. Finds the best response (highest reward) in batch

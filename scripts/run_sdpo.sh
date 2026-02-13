@@ -136,9 +136,7 @@ export TEST_FREQ="${TEST_FREQ:-5}"
 export MAX_CKPT_TO_KEEP="${MAX_CKPT_TO_KEEP:-2}"
 
 # Improved SDPO settings (experimental)
-# TEMPORARILY DISABLED: vLLM CUDA error during teacher revision rollout
-# TODO: debug vLLM flash_attn scheduler_metadata issue
-export USE_IMPROVED_SDPO="${USE_IMPROVED_SDPO:-false}"
+export USE_IMPROVED_SDPO="${USE_IMPROVED_SDPO:-true}"
 export IMITATION_LOSS_WEIGHT="${IMITATION_LOSS_WEIGHT:-0.5}"
 export IMPROVED_SDPO_MIN_REWARD="${IMPROVED_SDPO_MIN_REWARD:-0.5}"
 
