@@ -532,11 +532,17 @@ class AgentLoopWorker:
         #   e.g., [0,0,0,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,0,0,0,0]
 
         # TODO(wuxibin): remove padding and use tensordict.
+        # Left-truncate prompt if it exceeds prompt_length (e.g. revision prompts with feedback).
+        # This preserves the most recent context (end of prompt) which is most important for generation.
+        prompt_max_len = self.config.actor_rollout_ref.rollout.prompt_length
+        if len(output.prompt_ids) > prompt_max_len:
+            output.prompt_ids = output.prompt_ids[-prompt_max_len:]
+
         self.tokenizer.padding_side = "left"
         prompt_output = self.tokenizer.pad(
             {"input_ids": output.prompt_ids},
             padding="max_length",
-            max_length=self.config.actor_rollout_ref.rollout.prompt_length,
+            max_length=prompt_max_len,
             return_tensors="pt",
             return_attention_mask=True,
         )

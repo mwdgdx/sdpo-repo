@@ -948,21 +948,18 @@ class RayPPOTrainer:
         simplified_revision_template = self_distillation_cfg.get("simplified_revision_template",
             "{prompt}\n\nFeedback from a previous attempt:\n{feedback}\n\nBased on the feedback above, provide a correct solution.")
         
-        max_model_len = self.config.actor_rollout_ref.rollout.max_model_len
-        # vLLM calculates max_tokens = response_length + prompt_length - len(prompt_ids)
-        # For this to be positive and reasonable, we need:
-        # len(prompt_ids) < response_length + prompt_length
-        # With typical config: response_length=8192, prompt_length=2048 -> limit is ~10240
-        # To be safe, limit prompt to max_model_len - response_length to ensure enough space
         response_length = self.config.actor_rollout_ref.rollout.response_length
         prompt_length = self.config.actor_rollout_ref.rollout.prompt_length
-        # Use the vLLM constraint: prompt + response must fit in max_model_len
-        # Leave buffer for vLLM's internal calculations
+        max_model_len = self.config.actor_rollout_ref.rollout.max_model_len
+        # Ensure prompt + response fits in max_model_len with buffer.
+        # _agent_loop_postprocess now left-truncates prompts that exceed prompt_length,
+        # so we don't need to limit to prompt_length here. We just need to ensure
+        # the prompt is short enough for vLLM to generate a reasonable response.
         max_safe_prompt_len = min(
             max_model_len - response_length - 256,  # Ensure space for full response + buffer
             response_length + prompt_length - 512,   # Match vLLM's max_tokens calculation
         )
-        print(f"[Improved SDPO] max_safe_prompt_len={max_safe_prompt_len} (max_model_len={max_model_len}, response_length={response_length})")
+        print(f"[Improved SDPO] max_safe_prompt_len={max_safe_prompt_len} (max_model_len={max_model_len}, prompt_length={prompt_length}, response_length={response_length})")
         
         for uid in unique_uids:
             best_idx, best_reward = best_by_uid[uid]
