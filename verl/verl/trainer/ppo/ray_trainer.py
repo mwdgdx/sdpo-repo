@@ -1209,12 +1209,16 @@ class RayPPOTrainer:
             uid = uids[i]
             if imitation_target_is_revised[i] and uid in revised_response_tensors:
                 resp = revised_response_tensors[uid]
-                # Keep mask as long (0/1) to avoid dtype issues with position_ids computation.
-                mask = (resp != self.tokenizer.pad_token_id).long()
+                # Keep mask as long (0/1) to avoid dtype/value issues with position_ids computation.
+                mask = (resp != self.tokenizer.pad_token_id).to(dtype=torch.long)
             else:
                 idx = imitation_target_idx[i]
                 resp = responses[idx]
-                mask = response_mask[idx]
+                # IMPORTANT: `response_mask` in this codebase is *not* a boolean 0/1 mask.
+                # It is token-ids-with-padding-zeroed (see agent_loop postprocess), so using it
+                # here would produce huge `position_ids` (cumsum of token ids) and can crash
+                # FlashAttention with CUDA illegal memory access.
+                mask = (resp != self.tokenizer.pad_token_id).to(dtype=torch.long)
             imitation_target_responses.append(resp)
             imitation_target_masks_list.append(mask)
         

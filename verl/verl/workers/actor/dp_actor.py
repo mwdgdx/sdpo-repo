@@ -250,6 +250,21 @@ class DataParallelPPOActor(BasePPOActor):
             if position_ids.dim() == 3:  # qwen2vl mrope
                 position_ids = position_ids.transpose(0, 1)  # (bsz, 4, seqlen) -> (4, bsz, seqlen)
 
+            # Fail fast on corrupt position_ids rather than crashing inside FlashAttention.
+            # In particular, if an upstream "mask" contains token ids (instead of 0/1),
+            # `compute_position_id_with_mask` can generate huge position indices.
+            if position_ids.dtype != torch.long:
+                position_ids = position_ids.to(dtype=torch.long)
+            try:
+                pos_max = int(position_ids.max().item()) if position_ids.numel() > 0 else 0
+            except BaseException:
+                pos_max = 0
+            if pos_max > seqlen + 8:
+                raise ValueError(
+                    f"Invalid position_ids: max={pos_max} > seqlen={seqlen}. "
+                    "This usually means attention/response masks contained non-(0/1) values upstream."
+                )
+
             if self.use_remove_padding:
                 # SDPO: rmpad branch currently does not support full-logit or top-k distillation
                 if compute_all_logps or use_topk:
