@@ -258,14 +258,43 @@ class vLLMHttpServer:
 
         if quantization == "fp8":
             hf_overrides["quantization_config"] = fp8_block_quant_kwargs
-        compilation_config = engine_kwargs.pop("compilation_config", None)
-        if compilation_config is None:
-            compilation_config = {"cudagraph_mode": "FULL_AND_PIECEWISE"}
-        else:
-            if isinstance(compilation_config, str):
-                compilation_config = json.loads(compilation_config)
-            compilation_config.setdefault("cudagraph_mode", "FULL_AND_PIECEWISE")
-        compilation_config = json.dumps(compilation_config)
+        # vLLM compilation_config (CUDA graph settings).
+        #
+        # If enforce_eager=True, CUDA graphs are disabled, so we should not force or
+        # synthesize cudagraph-specific settings like max_cudagraph_capture_size.
+        # This keeps "eager mode" truly minimal and avoids confusion when debugging.
+        compilation_config = None
+        if not self.config.enforce_eager:
+            compilation_config = engine_kwargs.pop("compilation_config", None)
+            if compilation_config is None:
+                compilation_config = {"cudagraph_mode": "FULL_AND_PIECEWISE"}
+            else:
+                if isinstance(compilation_config, str):
+                    compilation_config = json.loads(compilation_config)
+                compilation_config.setdefault("cudagraph_mode", "FULL_AND_PIECEWISE")
+
+            # Defensive: ensure max_cudagraph_capture_size is never 0/too-small.
+            # vLLM uses this to size internal metadata buffers; if it's 0 or smaller than
+            # the scheduler's token budget, we can hit metadata overflow / illegal memory access.
+            try:
+                target_capture = int(getattr(self.config, "max_num_batched_tokens", 0) or 0)
+            except Exception:
+                target_capture = 0
+            target_capture = max(target_capture, 8192)
+            try:
+                cur_capture = int(compilation_config.get("max_cudagraph_capture_size", 0) or 0)
+            except Exception:
+                cur_capture = 0
+            compilation_config["max_cudagraph_capture_size"] = max(cur_capture, target_capture)
+
+        print(
+            f">>> [vLLM] enforce_eager={self.config.enforce_eager} "
+            f"max_num_batched_tokens={self.config.max_num_batched_tokens} "
+            f"compilation_config={compilation_config}",
+            flush=True,
+        )
+        if compilation_config is not None:
+            compilation_config = json.dumps(compilation_config)
         args = {
             "dtype": self.config.dtype,
             "load_format": self.config.load_format,
@@ -289,9 +318,10 @@ class vLLMHttpServer:
             "quantization": quantization,
             "hf_overrides": hf_overrides,
             "scheduling_policy": self.config.scheduling_policy,
-            "compilation_config": compilation_config,
             **engine_kwargs,
         }
+        if compilation_config is not None:
+            args["compilation_config"] = compilation_config
 
         if self.config.prometheus.enable:
             if self.config.prometheus.served_model_name:
@@ -506,8 +536,13 @@ class vLLMHttpServer:
             # support sglang-style 'max_new_tokens' param
             max_tokens = sampling_params.pop("max_new_tokens")
         else:
-            # Default to a calculation that considers configured lengths
-            max_tokens = self.config.response_length + self.config.prompt_length - len(prompt_ids)
+            # Default to configured response_length.
+            #
+            # IMPORTANT: do NOT use `response_length + prompt_length - len(prompt_ids)` here.
+            # That formula makes max_tokens *increase* when prompt is shorter than prompt_length,
+            # which can trigger ultra-long generations (e.g., 1617 -> 8623) and push vLLM into
+            # known-unstable regions (scheduled tokens / metadata overflow).
+            max_tokens = self.config.response_length
 
         # Clamp max_tokens to the valid range [0, max_possible_tokens]
         max_tokens = max(0, min(max_tokens, max_possible_tokens))

@@ -1209,7 +1209,8 @@ class RayPPOTrainer:
             uid = uids[i]
             if imitation_target_is_revised[i] and uid in revised_response_tensors:
                 resp = revised_response_tensors[uid]
-                mask = (resp != self.tokenizer.pad_token_id).float()
+                # Keep mask integer (0/1) to avoid producing float position_ids downstream.
+                mask = (resp != self.tokenizer.pad_token_id).to(dtype=response_mask.dtype)
             else:
                 idx = imitation_target_idx[i]
                 resp = responses[idx]
@@ -1263,6 +1264,7 @@ class RayPPOTrainer:
             imitation_teacher_prompt["attention_mask"].to(device), 
             imitation_target_masks
         ], dim=1)
+        imitation_teacher_attention_mask = imitation_teacher_attention_mask.to(dtype=torch.long)
         imitation_teacher_position_ids = compute_position_id_with_mask(imitation_teacher_attention_mask)
         
         # Build student input for imitation (original prompt + imitation target)
@@ -1273,6 +1275,7 @@ class RayPPOTrainer:
         
         imitation_student_input_ids = torch.cat([original_prompt_ids, imitation_target_responses], dim=1)
         imitation_student_attention_mask = torch.cat([original_prompt_mask, imitation_target_masks], dim=1)
+        imitation_student_attention_mask = imitation_student_attention_mask.to(dtype=torch.long)
         imitation_student_position_ids = compute_position_id_with_mask(imitation_student_attention_mask)
         
         # ============================================================

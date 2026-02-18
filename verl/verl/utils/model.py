@@ -224,6 +224,10 @@ def create_random_mask(
 
 
 def compute_position_id_with_mask(mask):
+    # IMPORTANT: position_ids must be integer indices. Some upstream callers
+    # may provide float masks (e.g., from `.float()`), which would otherwise
+    # produce float position_ids and can break FlashAttention kernels.
+    mask = mask.to(dtype=torch.long)
     return torch.clip(torch.cumsum(mask, dim=-1) - 1, min=0, max=None)
 
 
