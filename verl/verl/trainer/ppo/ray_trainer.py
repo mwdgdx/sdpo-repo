@@ -1209,8 +1209,8 @@ class RayPPOTrainer:
             uid = uids[i]
             if imitation_target_is_revised[i] and uid in revised_response_tensors:
                 resp = revised_response_tensors[uid]
-                # Keep mask integer (0/1) to avoid producing float position_ids downstream.
-                mask = (resp != self.tokenizer.pad_token_id).to(dtype=response_mask.dtype)
+                # Keep mask as long (0/1) to avoid dtype issues with position_ids computation.
+                mask = (resp != self.tokenizer.pad_token_id).long()
             else:
                 idx = imitation_target_idx[i]
                 resp = responses[idx]
@@ -1270,8 +1270,9 @@ class RayPPOTrainer:
         # Build student input for imitation (original prompt + imitation target)
         # This is needed because student needs to see prompt + target to compute log_prob
         # Use stored original prompt info to avoid issues after batch.union()
-        original_prompt_ids = batch.meta_info["improved_sdpo_original_prompt_ids"]
-        original_prompt_mask = batch.meta_info["improved_sdpo_original_prompt_mask"]
+        # NOTE: Must move to device - meta_info tensors may not be on the same device as batch tensors
+        original_prompt_ids = batch.meta_info["improved_sdpo_original_prompt_ids"].to(device)
+        original_prompt_mask = batch.meta_info["improved_sdpo_original_prompt_mask"].to(device)
         
         imitation_student_input_ids = torch.cat([original_prompt_ids, imitation_target_responses], dim=1)
         imitation_student_attention_mask = torch.cat([original_prompt_mask, imitation_target_masks], dim=1)
