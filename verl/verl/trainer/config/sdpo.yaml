@@ -37,8 +37,9 @@ actor_rollout_ref:
       environment_feedback_only_without_solution: true  # Only use feedback when no solution available
       # ============================================================
       # Improved SDPO settings (set use_improved_sdpo: true to enable)
+      # stable-0 defaults to disabled (no imitation / no revise / no pick-best)
       # ============================================================
-      use_improved_sdpo: true  # Enable improved SDPO algorithm
+      use_improved_sdpo: false  # stable-0 default: disable improved SDPO path
       imitation_loss_weight: 0.5  # Weight for imitation KL loss (alpha in paper)
       # When enabled, the algorithm:
       # 1. Finds the best response (highest reward) in batch
