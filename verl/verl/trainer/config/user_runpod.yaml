@@ -75,7 +75,12 @@ trainer:
   nnodes: 1
   save_freq: ${oc.decode:${oc.env:SAVE_FREQ,10}}
   test_freq: ${oc.decode:${oc.env:TEST_FREQ,5}}
-  # Only keep latest N checkpoints to save disk space (old ones auto-deleted)
+  # Keep latest N regular full checkpoints for crash recovery.
+  # Protected steps configured below are exempt from deletion.
   max_actor_ckpt_to_keep: ${oc.decode:${oc.env:MAX_CKPT_TO_KEEP,2}}
+  # Save lightweight (model-only, no optimizer) checkpoints at these steps
+  lightweight_save_steps: [40, 80, 90]
+  # Keep optimizer-bearing full checkpoint at milestone step(s)
+  full_checkpoint_keep_steps: [80, 120]
   total_epochs: ${oc.decode:${oc.env:TOTAL_EPOCHS,30}}
   default_local_dir: ${oc.env:CKPT_DIR}/${trainer.experiment_name}

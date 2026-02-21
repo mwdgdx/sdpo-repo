@@ -1715,12 +1715,11 @@ class RayPPOTrainer:
         max_actor_ckpt_to_keep = (
             self.config.trainer.get("max_actor_ckpt_to_keep", None) if not remove_previous_ckpt_in_save else 1
         )
-        max_critic_ckpt_to_keep = (
-            self.config.trainer.get("max_critic_ckpt_to_keep", None) if not remove_previous_ckpt_in_save else 1
-        )
-
+        # IMPORTANT:
+        # We disable per-component internal rotation and perform retention at trainer level
+        # so that protected full-checkpoint steps can be kept.
         self.actor_rollout_wg.save_checkpoint(
-            actor_local_path, actor_remote_path, self.global_steps, max_ckpt_to_keep=max_actor_ckpt_to_keep
+            actor_local_path, actor_remote_path, self.global_steps, max_ckpt_to_keep=None
         )
 
         if self.use_critic:
@@ -1733,7 +1732,7 @@ class RayPPOTrainer:
                 )
             )
             self.critic_wg.save_checkpoint(
-                critic_local_path, critic_remote_path, self.global_steps, max_ckpt_to_keep=max_critic_ckpt_to_keep
+                critic_local_path, critic_remote_path, self.global_steps, max_ckpt_to_keep=None
             )
 
         # save dataloader
@@ -1757,6 +1756,75 @@ class RayPPOTrainer:
         )
         with open(local_latest_checkpointed_iteration, "w") as f:
             f.write(str(self.global_steps))
+
+        # Apply full-checkpoint retention at trainer level.
+        # Keep newest N regular checkpoints and never delete protected steps.
+        if isinstance(max_actor_ckpt_to_keep, int) and max_actor_ckpt_to_keep > 0:
+            self._cleanup_full_checkpoints(max_actor_ckpt_to_keep)
+
+    def _cleanup_full_checkpoints(self, max_ckpt_to_keep: int):
+        """Delete old full checkpoints while keeping protected milestone steps."""
+        import shutil
+
+        ckpt_root = self.config.trainer.default_local_dir
+        if not os.path.isdir(ckpt_root):
+            return
+
+        protected_steps = set(self.config.trainer.get("full_checkpoint_keep_steps", None) or [])
+        ckpt_entries: list[tuple[int, str]] = []
+
+        for name in os.listdir(ckpt_root):
+            match = re.fullmatch(r"global_step_(\d+)", name)
+            if not match:
+                continue
+            step = int(match.group(1))
+            path = os.path.join(ckpt_root, name)
+            if os.path.isdir(path):
+                ckpt_entries.append((step, path))
+
+        if not ckpt_entries:
+            return
+
+        # Keep most recent regular checkpoints (excluding protected) for recovery.
+        unprotected = sorted(
+            [(step, path) for step, path in ckpt_entries if step not in protected_steps],
+            key=lambda x: x[0],
+            reverse=True,
+        )
+        kept_regular_steps = {step for step, _ in unprotected[:max_ckpt_to_keep]}
+        kept_steps = protected_steps | kept_regular_steps
+
+        for step, path in ckpt_entries:
+            if step in kept_steps:
+                continue
+            print(f"Removing old full checkpoint: {path}")
+            shutil.rmtree(path, ignore_errors=True)
+
+    def _save_lightweight_checkpoint(self):
+        """Save a model-only checkpoint (no optimizer) to a separate model_only/ directory.
+
+        These are exempt from max_ckpt_to_keep rotation and much smaller (~16GB vs ~180GB
+        for Qwen3-8B) since optimizer state is excluded.
+        """
+        model_only_dir = os.path.join(self.config.trainer.default_local_dir, "model_only")
+        local_global_step_folder = os.path.join(model_only_dir, f"global_step_{self.global_steps}")
+        actor_local_path = os.path.join(local_global_step_folder, "actor")
+
+        print(f"Saving lightweight (model-only) checkpoint to: {actor_local_path}")
+
+        self.actor_rollout_wg.save_checkpoint(
+            actor_local_path, None, self.global_steps, max_ckpt_to_keep=None
+        )
+
+        # Delete optimizer files to keep only model weights
+        import glob as glob_module
+        optim_files = glob_module.glob(os.path.join(actor_local_path, "optim_*.pt"))
+        for f in optim_files:
+            os.remove(f)
+            print(f"  Removed optimizer shard: {os.path.basename(f)}")
+
+        removed_size_gb = len(optim_files) * 10  # rough estimate
+        print(f"  Lightweight checkpoint saved (~{removed_size_gb}GB optimizer state removed)")
 
     def _load_checkpoint(self):
         if self.config.trainer.resume_mode == "disable":
@@ -2446,6 +2514,14 @@ class RayPPOTrainer:
                                 print("Force saving checkpoint: ESI instance expiration approaching.")
                             with marked_timer("save_checkpoint", timing_raw, color="green"):
                                 self._save_checkpoint()
+
+                        # Lightweight checkpoints are configured independently from save_freq.
+                        # This keeps milestone model-only snapshots available even when regular
+                        # checkpoint cadence/retention is changed.
+                        lightweight_steps = self.config.trainer.get("lightweight_save_steps", None) or []
+                        if self.global_steps in lightweight_steps:
+                            with marked_timer("save_lightweight_checkpoint", timing_raw, color="green"):
+                                self._save_lightweight_checkpoint()
 
                         # update weights from trainer to rollout
                         with marked_timer("update_weights", timing_raw, color="red"):

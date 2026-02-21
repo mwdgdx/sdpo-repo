@@ -201,6 +201,15 @@ trainer:
   # Maximum number of critic checkpoints to keep
   max_critic_ckpt_to_keep: null
 
+  # Steps at which to save lightweight (model-only, no optimizer) checkpoints.
+  # Saved to a separate model_only/ directory, exempt from max_ckpt_to_keep rotation.
+  # Example: [40, 80] saves model-only snapshots at steps 40 and 80.
+  lightweight_save_steps: null
+
+  # Full checkpoints at these steps are protected from retention deletion.
+  # Useful for milestone checkpoints that must keep optimizer state.
+  full_checkpoint_keep_steps: null
+
   # Timeout (in seconds) for Ray worker to wait for registration
   ray_wait_register_center_timeout: 300
 
